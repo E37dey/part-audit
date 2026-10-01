@@ -139,7 +139,7 @@ def run_audit(cfg: AuditConfig) -> AuditResult:
     if cfg.use_geometry:
         from .geometry import fingerprint_files
         t1 = time.perf_counter()
-        fps, geo_errors, gstats = fingerprint_files(
+        fps, geo_errors, gstats, fp_cache = fingerprint_files(
             [(it.file_id, it.rec.path, it.rec.sha256) for it in items.values()],
             workers=cfg.workers, timeout_s=cfg.timeout_s, cache_dir=cfg.cache_dir,
             progress=(lambda d, n: _log(cfg, f"[geometry] {d}/{n}")) if cfg.verbose else None)
@@ -153,7 +153,7 @@ def run_audit(cfg: AuditConfig) -> AuditResult:
                   f"({timings['geometry_s']:.1f}s)")
         if cfg.shape_check:
             from .shape import ShapeChecker
-            shape_fn = ShapeChecker(cache_dir=cfg.cache_dir, timeout_s=cfg.timeout_s)
+            shape_fn = ShapeChecker(fp_cache, cfg.thresholds)
 
     t2 = time.perf_counter()
     pairs = build_pairs(items, cfg.thresholds, use_geometry=cfg.use_geometry, shape_check=shape_fn)
