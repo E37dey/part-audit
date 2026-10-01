@@ -170,7 +170,9 @@ def build_rows(res) -> dict[str, list[dict]]:
     out["Name_Inconsistencies"] = ni
 
     # Mapping
-    out["PartNumber_Mapping"] = [{**m, "approved": None, "reviewer_notes": None} for m in res.mapping]
+    llm = (res.llm_notes or {}).get("mapping", {})
+    out["PartNumber_Mapping"] = [{**m, "approved": None, "reviewer_notes": None, "llm_note": llm.get(i)}
+                                 for i, m in enumerate(res.mapping)]
 
     # ERP vs CAD
     ev = []
@@ -251,12 +253,15 @@ def write_report(res, path: str | Path) -> Path:
     ws = wb.create_sheet("PartNumber_Mapping")
     ws.cell(row=1, column=1, value="Proposed part-number mapping - nothing is changed in the ERP. "
                                    "Fill 'Approved (Y/N)' and 'Reviewer notes'.").font = BOLD
-    last = _write_table(ws, rows["PartNumber_Mapping"], [
+    map_cols = [
         ("group_id", "Group", 9), ("old_pn", "Old PN", 16), ("proposed_pn", "Proposed PN", 16),
         ("reason", "Reason", 70), ("confidence", "Confidence", 10), ("status", "Status", 16),
         ("approved", "Approved (Y/N)", 13), ("reviewer_notes", "Reviewer notes", 36),
-        ("files_old", "Files (old PN)", 44), ("files_proposed", "Files (proposed PN)", 44)],
-        start_row=3, wrap_cols=("reason", "files_old", "files_proposed"))
+        ("files_old", "Files (old PN)", 44), ("files_proposed", "Files (proposed PN)", 44)]
+    if any(r.get("llm_note") for r in rows["PartNumber_Mapping"]):
+        map_cols.append(("llm_note", "LLM note (advisory, unverified)", 60))
+    last = _write_table(ws, rows["PartNumber_Mapping"], map_cols, start_row=3,
+                        wrap_cols=("reason", "files_old", "files_proposed", "llm_note"))
     if rows["PartNumber_Mapping"]:
         dv = DataValidation(type="list", formula1='"Y,N"', allow_blank=True)
         ws.add_data_validation(dv)

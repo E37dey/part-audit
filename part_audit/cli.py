@@ -70,8 +70,15 @@ def main(argv: list[str] | None = None) -> int:
         save_json(res, args.json)
     print(f"report: {path}")
     if res.metrics:
+        from .metrics import write_details
+        stem = Path(args.out).with_suffix("")
+        write_details(res.metrics, f"{stem}_eval_details.csv")
+        Path(f"{stem}_metrics.json").write_text(json.dumps({k: v for k, v in res.metrics.items() if k != "details"},
+                                                           indent=1, ensure_ascii=False, default=str), encoding="utf-8")
+        print(f"metrics: {stem}_metrics.json, details: {stem}_eval_details.csv")
         for row in res.metrics.get("per_type", []):
-            print(f"  {row['type']:<38} P={row['precision']} R={row['recall']} F1={row['f1']} target={row['target']} met={row['met']}")
+            print(f"  {row['type']:<34} n={row['n_pairs']} tp={row['tp']} fp={row['fp']} P={row['precision']} "
+                  f"R={row['recall']} F1={row['f1']} target={row['target']} met={row['met']}")
     return 0
 
 

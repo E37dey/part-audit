@@ -10,8 +10,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .names import (NameParts, best_match, blocking_pairs, is_generic_product_name, parse_name, pn_core,
-                    pn_key)
+from .names import (NameIndex, NameParts, best_match, blocking_pairs, is_generic_product_name, parse_name,
+                    pn_core, pn_key)
 from .scan import SkipRecord, load_erp, scan_folder
 from .scoring import Item, Pair, Thresholds, build_pairs, duplicate_groups, propose_mapping
 
@@ -109,9 +109,10 @@ def erp_duplicate_candidates(erp_rows: list[dict], th: Thresholds) -> list[dict]
     parsed = {str(r["erp_row"]): [parse_name(str(r.get("description", "")), known_pns=[r["part_number"]])]
               for r in erp_rows}
     by_row = {str(r["erp_row"]): r for r in erp_rows}
+    index = NameIndex(parsed, {str(r["erp_row"]): pn_key(r["part_number"]) for r in erp_rows}, k0=th.name_k0)
     out = []
     for a, b in sorted(blocking_pairs(parsed)):
-        m = best_match(parsed[a], parsed[b])
+        m = best_match(parsed[a], parsed[b], index)
         ra, rb = by_row[a], by_row[b]
         if m and m.score >= th.name_similar and pn_key(ra["part_number"]) != pn_key(rb["part_number"]):
             out.append({"erp_row_a": ra["erp_row"], "pn_a": ra["part_number"], "desc_a": ra.get("description", ""),

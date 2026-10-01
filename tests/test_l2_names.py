@@ -97,3 +97,17 @@ def test_blocking_finds_variants_not_everything():
     pairs = blocking_pairs(items)
     assert ("a", "b") in pairs and ("a", "c") in pairs and ("d", "e") in pairs
     assert not any("f" in p for p in pairs)
+
+
+def test_generic_descriptions_are_discounted():
+    from part_audit.names import NameIndex
+    items = {f"f{i}": [parse_name(f"PA-{10000 + i} profile inner")] for i in range(8)}   # 8 different PNs
+    items["u1"] = [parse_name("PA-20000 hinge bracket upper")]
+    items["u2"] = [parse_name("PA-30000 upper hinge brkt")]
+    idx = NameIndex(items, {k: v[0].pn_keys[0] for k, v in items.items()}, k0=3)
+    generic = compare_names(items["f0"][0], items["f1"][0], idx)
+    specific = compare_names(items["u1"][0], items["u2"][0], idx)
+    assert generic.score < 0.85 and "generic description" in generic.detail
+    assert specific.score >= 0.95
+    # same PN is never discounted
+    assert compare_names(parse_name("PA-10000 profile inner"), items["f0"][0], idx).score == 1.0

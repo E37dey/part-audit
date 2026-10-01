@@ -56,8 +56,8 @@ def set_product_name(path: str, pid: str, name: str) -> None:
     with open(path, "rb") as fh:
         data = fh.read()
     text = data.decode("latin-1")
-    rep = f"\\1'{encode_step_string(pid)}','{encode_step_string(name)}'"
-    new, n = _PRODUCT_RE.subn(rep, text, count=1)
+    payload = f"'{encode_step_string(pid)}','{encode_step_string(name)}'"
+    new, n = _PRODUCT_RE.subn(lambda m: m.group(1) + payload, text, count=1)
     if n:
         with open(path, "wb") as fh:
             fh.write(new.encode("latin-1"))
@@ -157,16 +157,24 @@ def _ok(new, old, max_rel_vol_change: float) -> bool:
         return False
 
 
-def push_pull(shape, rng: random.Random, rel: float, max_rel_vol_change: float = 0.08):
-    """Move one planar face outward by ``rel`` of the part size along its normal (a 'dimension change')."""
+def _extent_along(shape, n) -> float:
+    """Extent of the part along direction n (from the axis-aligned box; exact for axis-aligned normals)."""
+    x0, y0, z0, x1, y1, z1 = bbox(shape)
+    return abs(n.X()) * (x1 - x0) + abs(n.Y()) * (y1 - y0) + abs(n.Z()) * (z1 - z0)
+
+
+def push_pull(shape, rng: random.Random, rel: float, max_rel_vol_change: float = 0.08, n_faces: int = 8):
+    """Move one planar face along its normal by ``rel`` of the part's extent in that direction.
+
+    This is what a dimension change in a CAD system does to the B-rep (planes stay planes).
+    Tries outward (add material) first, then inward (remove material).
+    """
     from OCP.BRepLProp import BRepLProp_SLProps
     from OCP.BRepTools import BRepTools
     from OCP.TopAbs import TopAbs_REVERSED
-    x0, y0, z0, x1, y1, z1 = bbox(shape)
-    size = max(x1 - x0, y1 - y0, z1 - z0)
     faces = [f for f in _faces(shape) if BRepAdaptor_Surface(f).GetType() == GeomAbs_Plane]
     faces.sort(key=_face_area, reverse=True)
-    cands = faces[:6]
+    cands = faces[:n_faces]
     rng.shuffle(cands)
     for f in cands:
         umin, umax, vmin, vmax = BRepTools.UVBounds_s(f)
@@ -175,15 +183,19 @@ def push_pull(shape, rng: random.Random, rel: float, max_rel_vol_change: float =
             continue
         n = props.Normal()
         if f.Orientation() == TopAbs_REVERSED:
-            n.Reverse()
-        d = rel * size
-        try:
-            prism = BRepPrimAPI_MakePrism(f, gp_Vec(n.X() * d, n.Y() * d, n.Z() * d)).Shape()
-            fused = _clean(BRepAlgoAPI_Fuse(shape, prism).Shape())
-        except Exception:
+            n.Reverse()  # outward normal
+        d = rel * _extent_along(shape, n)
+        if d <= 0:
             continue
-        if _ok(fused, shape, max_rel_vol_change):
-            return fused, f"push-pull {rel:.2%} of size on a planar face"
+        for sign, op in ((1, "fuse"), (-1, "cut")):
+            try:
+                prism = BRepPrimAPI_MakePrism(f, gp_Vec(sign * n.X() * d, sign * n.Y() * d, sign * n.Z() * d)).Shape()
+                new = BRepAlgoAPI_Fuse(shape, prism).Shape() if op == "fuse" else BRepAlgoAPI_Cut(shape, prism).Shape()
+                new = _clean(new)
+            except Exception:
+                continue
+            if _ok(new, shape, max_rel_vol_change):
+                return new, f"face moved {'out' if sign > 0 else 'in'} by {rel:.2%} of the part extent ({d:.3g} mm)"
     return None, ""
 
 

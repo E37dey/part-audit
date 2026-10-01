@@ -27,7 +27,7 @@ from collections import deque
 from multiprocessing.connection import wait
 from pathlib import Path
 
-FP_VERSION = 3
+FP_VERSION = 5
 
 SURFACE_NAMES = {
     "GeomAbs_Plane": "plane", "GeomAbs_Cylinder": "cylinder", "GeomAbs_Cone": "cone", "GeomAbs_Sphere": "sphere",
@@ -232,6 +232,12 @@ def mesh_features(shape, fp: dict, n_samples: int = N_SAMPLES) -> None:
         vec[:, 2] = -vec[:, 2]
     local = (v - cen) @ vec
     ext = local.max(0) - local.min(0)
+    # exact third moments of the triangulated surface along the principal axes; their product
+    # is a pseudoscalar: unchanged by rotations, sign flipped by a mirror, ~0 for symmetric parts
+    ta, tb, tc = local[t[:, 0]], local[t[:, 1]], local[t[:, 2]]
+    m3 = (w[:, None] * (ta**3 + tb**3 + tc**3 + ta * ta * tb + ta * ta * tc + tb * tb * ta + tb * tb * tc
+                        + tc * tc * ta + tc * tc * tb + ta * tb * tc) / 10.0).sum(0) / area
+    fp["surf_skew"] = [float(x) for x in m3 / np.maximum(lam, 1e-30) ** 1.5]
     fp["bbox_pca"] = sorted((float(x) for x in ext), reverse=True)
     fp["surf_eig"] = [float(x) for x in lam]
     fp["mesh_triangles"] = int(len(t))
@@ -242,7 +248,10 @@ def mesh_features(shape, fp: dict, n_samples: int = N_SAMPLES) -> None:
     r1[flip], r2[flip] = 1 - r1[flip], 1 - r2[flip]
     a, b, c = local[t[idx, 0]], local[t[idx, 1]], local[t[idx, 2]]
     pts = a + r1[:, None] * (b - a) + r2[:, None] * (c - a)
-    fp["_samples"] = pts.astype(np.float32)  # canonical (surface principal) frame, mm
+    scale = float(np.linalg.norm(ext)) or 1.0
+    fp["sample_scale"] = scale  # samples are stored divided by the bbox diagonal (float16-safe)
+    fp["sample_area"] = float(area)
+    fp["_samples"] = (pts / scale).astype(np.float32)  # canonical (surface principal) frame
 
 
 def fingerprint_path(path: str) -> dict:

@@ -4,16 +4,18 @@ Each file carries 4096 surface points sampled (area-weighted) from its mesh and
 expressed in its own surface-principal frame (computed in geometry.py). Two
 shapes are compared by trying the frame ambiguities (8 axis sign flips, plus
 rotations around an axis when two principal values are nearly equal) and
-measuring nearest-neighbour distances between the point sets:
+measuring nearest-neighbour (NN) distances between the two point sets.
 
-* ``p50_rel`` / ``p95_rel`` - median / 95th percentile surface distance of the
-  best proper (rotation-only) alignment, divided by the bounding-box diagonal.
-* ``mirror``                - the best *improper* alignment (a reflection) fits
-  much better than any rotation: mirror-image part (left/right hand).
+Random sampling alone produces NN distances even between identical surfaces:
+for n uniform points on area A the NN distance follows P(d > r) = exp(-n*pi*r^2/A),
+so the median is 0.47*sqrt(A/n) and the 95th percentile 0.98*sqrt(A/n). Distances
+are therefore reported as *excess* over that noise (1.0 = indistinguishable from
+the same surface) and, for people, as a share of the bounding-box diagonal.
 
-Sampling noise is a few tenths of a percent of the part size, so this layer
-separates "same overall shape" from "different shape" and detects mirror images;
-small design changes are detected by the global properties in L3.
+* ``excess50`` / ``excess95`` - best rotation-only alignment, median / p95 NN
+  distance divided by the sampling-noise level.
+* ``mirror`` - a reflection fits at noise level while no rotation does:
+  mirror-image (left/right-hand) part.
 """
 from __future__ import annotations
 
@@ -29,6 +31,8 @@ except Exception:  # pragma: no cover
 
 _SIGNS = [np.diag(s).astype(np.float64) for s in
           [(1, 1, 1), (1, -1, -1), (-1, 1, -1), (-1, -1, 1), (-1, 1, 1), (1, -1, 1), (1, 1, -1), (-1, -1, -1)]]
+NOISE50 = math.sqrt(math.log(2) / math.pi)    # 0.470 * sqrt(A/n)
+NOISE95 = math.sqrt(math.log(20) / math.pi)   # 0.977 * sqrt(A/n)
 
 
 def _rot(axis: int, theta: float) -> np.ndarray:
@@ -89,16 +93,18 @@ def candidate_transforms(eig_a, eig_b, tol: float = 0.03, step_deg: float = 10.0
     else:
         base = [np.eye(3)]
         mode = "unique"
-    out = []
-    for r in base:
-        for s in _SIGNS:
-            out.append(r @ s)
-    return out, mode
+    return [r @ s for r in base for s in _SIGNS], mode
 
 
-def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, mirror_ratio: float = 0.5) -> dict:
-    """Best proper and improper alignment distances between two canonical point sets."""
+def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float, mirror_ratio: float = 0.6) -> dict:
+    """Best proper and improper alignment of two canonical point sets (same length unit).
+
+    ``area`` is the surface area (same unit squared) used for the sampling-noise level.
+    """
     diag = float(np.linalg.norm(pa.max(0) - pa.min(0))) or 1.0
+    n = min(len(pa), len(pb))
+    spacing = math.sqrt(max(area, 1e-30) / n)
+    n50, n95 = NOISE50 * spacing, NOISE95 * spacing
     nn_a = _NN(pa)
     transforms, mode = candidate_transforms(eig_a, eig_b)
     sub = pb[:: max(1, len(pb) // 1024)]  # coarse search on a subset
@@ -108,17 +114,25 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, mirror_rati
         sgn = 1 if np.linalg.det(t) > 0 else -1
         if d < best[sgn][0]:
             best[sgn] = (d, t)
-    res = {"mode": mode, "n_transforms": len(transforms), "diag": diag}
+    res = {"mode": mode, "n_transforms": len(transforms), "diag": diag, "noise95_rel": n95 / diag}
     for sgn, label in ((1, "proper"), (-1, "improper")):
         t = best[sgn][1]
         tb = pb @ t.T
         d_ba = nn_a.query(tb)
         d_ab = _NN(tb).query(pa)
-        res[f"{label}_p50"] = max(float(np.median(d_ab)), float(np.median(d_ba))) / diag
-        res[f"{label}_p95"] = max(float(np.quantile(d_ab, 0.95)), float(np.quantile(d_ba, 0.95))) / diag
-    res["p50_rel"] = res["proper_p50"]
-    res["p95_rel"] = res["proper_p95"]
-    res["mirror"] = bool(res["improper_p50"] < mirror_ratio * res["proper_p50"] and res["proper_p50"] > 0.01)
+        p50 = max(float(np.median(d_ab)), float(np.median(d_ba)))
+        p95 = max(float(np.quantile(d_ab, 0.95)), float(np.quantile(d_ba, 0.95)))
+        res[f"{label}_excess50"] = p50 / n50
+        res[f"{label}_excess95"] = p95 / n95
+        res[f"{label}_p95_rel"] = p95 / diag
+    res["excess50"] = res["proper_excess50"]
+    res["excess95"] = res["proper_excess95"]
+    res["p95_rel"] = res["proper_p95_rel"]
+    strong = (res["improper_excess95"] < 1.5 and res["proper_excess95"] > 2.0
+              and res["improper_excess95"] < mirror_ratio * res["proper_excess95"])
+    # subtle handedness: the reflection fits at noise level and clearly better than any rotation
+    subtle = res["improper_excess50"] < 1.2 and res["proper_excess50"] - res["improper_excess50"] > 0.4
+    res["mirror"] = bool(strong or subtle)
     return res
 
 
@@ -134,13 +148,15 @@ class ShapeChecker:
         self.seconds = 0.0
 
     def _points(self, item):
-        sha = (item.fp or {}).get("sha")
-        if not sha or not (item.fp or {}).get("has_samples", True):
+        fp = item.fp or {}
+        sha = fp.get("sha")
+        if not sha or not fp.get("has_samples") or not fp.get("sample_scale"):
             return None
         if sha not in self.memo:
             if len(self.memo) >= self.max_memo:
                 self.memo.pop(next(iter(self.memo)))
-            self.memo[sha] = self.cache.get_samples(sha)
+            pts = self.cache.get_samples(sha)
+            self.memo[sha] = None if pts is None else pts * fp["sample_scale"]
         return self.memo[sha]
 
     def __call__(self, ia, ib, geo) -> dict | None:
@@ -148,10 +164,11 @@ class ShapeChecker:
         if pa is None or pb is None:
             return None
         t0 = time.perf_counter()
+        area = ia.fp.get("sample_area") or ia.fp.get("area", 0.0)
         if geo is not None and geo.scale != 1.0:
             pb = pb * geo.scale
         res = compare_point_sets(pa, pb, ia.fp.get("surf_eig", [1, 1, 1]), ib.fp.get("surf_eig", [1, 1, 1]),
-                                 self.th.mirror_ratio)
+                                 area, self.th.mirror_ratio)
         self.n_checks += 1
         self.seconds += time.perf_counter() - t0
         return res

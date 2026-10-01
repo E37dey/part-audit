@@ -16,6 +16,7 @@ shared token pair) so the comparison is not all-pairs.
 """
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from collections import defaultdict
@@ -84,13 +85,38 @@ NOISE_WORDS = {
     "ישנ", "ישן", "חדש", "סופי", "עותק", "העתק", "גרסה", "גירסה", "תיקונ", "תיקון", "טיוטה", "מעודכנ",
     "מעודכן", "חלק", "קובצ", "קובץ", "של", "עם", "ל", "סופית", "אחרונ", "אחרון", "לא", "להשתמש",
 }
+_B, _E = r"(?<![a-z0-9])", r"(?![a-z0-9])"   # word boundaries that treat '_' as a separator
 _NOISE_PATTERNS = [
-    re.compile(r"\bcopy\s+of\b", re.I), re.compile(r"\s-\s*copy(\s*\(\d+\))?", re.I),
-    re.compile(r"\(\s*\d{1,2}\s*\)"), re.compile(r"\brev(?:ision)?[\s._-]*[a-z0-9]{1,3}\b", re.I),
-    re.compile(r"(?<![a-z0-9])v(?:er)?[\s._-]?\d{1,3}(?![0-9])", re.I), re.compile(r"(?<![a-z0-9])r\d{1,2}(?![0-9])", re.I),
-    re.compile(r"\bfinal[\s_-]?\d*\b", re.I), re.compile(r"\bcopy[\s_-]?\d*\b", re.I),
+    re.compile(_B + r"copy\s+of" + _E, re.I), re.compile(r"\s-\s*copy(\s*\(\d+\))?", re.I),
+    re.compile(r"\(\s*\d{1,2}\s*\)"), re.compile(_B + r"rev(?:ision)?[\s._-]*[a-z0-9]{1,3}" + _E, re.I),
+    re.compile(_B + r"v(?:er)?[\s._-]?\d{1,3}(?![0-9])", re.I), re.compile(_B + r"r\d{1,2}(?![0-9])", re.I),
+    re.compile(_B + r"final[\s_-]?\d*" + _E, re.I), re.compile(_B + r"copy[\s_-]?\d*" + _E, re.I),
     re.compile(r"גרסה\s*\d+"), re.compile(r"גירסה\s*\d+"),
 ]
+# material mentions inside names are attributes, not description words
+MATERIAL_WORDS = {"aluminum": "aluminum", "stainless": "stainless", "steel": "steel", "brass": "brass",
+                  "copper": "copper", "pom": "pom", "delrin": "pom", "acetal": "pom", "nylon": "nylon",
+                  "peek": "peek", "abs": "abs", "pvc": "pvc", "titanium": "titanium", "st": "steel",
+                  "אלומיניום": "aluminum", "נירוסטה": "stainless", "פלדה": "steel", "פליז": "brass",
+                  "דלרין": "pom", "ניילון": "nylon"}
+GRADES = {"aluminum": {"1050", "1100", "2011", "2024", "3003", "5052", "5083", "5754", "6060", "6061", "6063",
+                       "6082", "7020", "7075"},
+          "stainless": {"303", "304", "316", "321", "410", "420", "430"}, "steel": {"37", "45", "52", "235", "355"}}
+_MATERIAL_CODE = re.compile(r"(?<![A-Za-z0-9])(AL|SS|ST|AISI)[\s_-]?(\d{2,4})(?![0-9])", re.I)
+_CODE_MAT = {"al": "aluminum", "ss": "stainless", "aisi": "stainless", "st": "steel"}
+
+
+def _material_codes(text: str) -> tuple[str, list[str]]:
+    """Take material codes with a known grade (AL6061, SS-304, ST37) out of a name."""
+    found: list[str] = []
+
+    def repl(m):
+        mat = _CODE_MAT[m.group(1).lower()]
+        if m.group(2) in GRADES[mat]:
+            found.append(f"{mat} {m.group(2)}")
+            return " "
+        return m.group(0)
+    return _MATERIAL_CODE.sub(repl, text), found
 GENERIC_PRODUCT_NAME = re.compile(
     r"^(?:|none|null|default|unnamed|untitled|product|component|shape|item|solid|body|part|blob|copy|"
     r"open cascade step translator.*|(?:part|body|solid|component|blob|product|shape|item|feature|copy)[\s_-]*\d*|"
@@ -113,6 +139,7 @@ def _strip_heb(s: str) -> str:
 
 
 HEBREW_TERMS = {_strip_heb(k): v for k, v in HEBREW_TERMS.items()}
+MATERIAL_WORDS = {_strip_heb(k): v for k, v in MATERIAL_WORDS.items()}
 HEBREW_PHRASES = {_strip_heb(k): v for k, v in HEBREW_PHRASES.items()}
 NOISE_WORDS = {_strip_heb(w) for w in NOISE_WORDS}
 ENGLISH_VOCAB = set(ABBREVIATIONS.values()) | set(SYNONYMS.values()) | set(v for v in HEBREW_TERMS.values() if v) | {
@@ -165,11 +192,16 @@ def phonetic_key(token: str) -> str:
 
 
 _PHONETIC_TO_TERM: dict[str, str] = {}
+_ambiguous_keys: set[str] = set()
 for _heb, _eng in HEBREW_TERMS.items():
     if _eng:
         _k = phonetic_key(_heb)
-        if len(_k) >= 3:
+        if len(_k) >= 2:
+            if _k in _PHONETIC_TO_TERM and _PHONETIC_TO_TERM[_k] != _eng:
+                _ambiguous_keys.add(_k)
             _PHONETIC_TO_TERM.setdefault(_k, _eng)
+for _k in _ambiguous_keys:
+    _PHONETIC_TO_TERM.pop(_k, None)
 
 # --------------------------------------------------------------------------- part numbers
 
@@ -261,7 +293,7 @@ def _canon_latin(tok: str) -> str | None:
         return w
     if len(tok) >= 4:  # transliterated Hebrew, e.g. "tushevet" -> bracket
         k = phonetic_key(tok)
-        if len(k) >= 3 and k in _PHONETIC_TO_TERM:
+        if len(k) >= 2 and k in _PHONETIC_TO_TERM:
             return _PHONETIC_TO_TERM[k]
     return w
 
@@ -273,6 +305,7 @@ class NameParts:
     pn_keys: list[str] = field(default_factory=list)
     words: list[str] = field(default_factory=list)     # canonical words (order kept)
     numbers: list[str] = field(default_factory=list)   # normalized numbers / dimensions
+    materials: list[str] = field(default_factory=list) # material mentions (aluminum 6061, ...)
 
     @property
     def canon(self) -> str:
@@ -290,14 +323,17 @@ def parse_name(text: str, known_pns: list[str] | None = None) -> NameParts:
     s = _strip_heb(s)
     # camelCase / letter-digit boundaries in Latin words: "MountingBracket" -> "Mounting Bracket"
     s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)
+    s, materials = _material_codes(s)  # before PN extraction: AL6061 is a material, not a part number
     pns = extract_part_numbers(s)
     if known_pns:
         pns += [k for k in known_pns if k not in pns]
     for pn in pns:  # remove PN text so its digits do not become description numbers
         s = s.replace(pn, " ")
     low = s.lower()
+    low = re.sub(r"(?<=[a-z])['`\u2019](?=[a-z])", "", low)  # taba'at -> tabaat (transliterated ע/א)
     for pat in _NOISE_PATTERNS:
         low = pat.sub(" ", low)
+
     for phrase, eng in HEBREW_PHRASES.items():
         low = low.replace(phrase, f" {eng} ")
     words: list[str] = []
@@ -307,15 +343,26 @@ def parse_name(text: str, known_pns: list[str] | None = None) -> NameParts:
             if _DATE.match(tok):
                 continue  # dates in file names are not dimensions
             numbers.append(_norm_number(tok))
+        elif _strip_heb(tok) in MATERIAL_WORDS or tok in MATERIAL_WORDS:
+            materials.append(MATERIAL_WORDS.get(tok) or MATERIAL_WORDS[_strip_heb(tok)])
         elif "א" <= tok[0] <= "ת":
             c = _canon_hebrew(tok)
             if c:
                 words.extend(c.split())
         else:
             c = _canon_latin(tok)
-            if c and len(c) > 1:
+            if c in ("aluminum", "stainless", "steel"):
+                materials.append(c)
+            elif c and len(c) > 1:
                 words.extend(c.split())
-    return NameParts(raw=raw, pns=pns, pn_keys=[pn_key(p) for p in pns], words=words, numbers=numbers)
+    for i, mat in enumerate(materials):  # "נירוסטה 304" -> stainless 304
+        if " " not in mat:
+            grade = next((n for n in numbers if n in GRADES.get(mat, ())), None)
+            if grade:
+                numbers.remove(grade)
+                materials[i] = f"{mat} {grade}"
+    return NameParts(raw=raw, pns=pns, pn_keys=[pn_key(p) for p in pns], words=words, numbers=numbers,
+                     materials=sorted(set(materials)))
 
 
 def is_generic_product_name(name: str) -> bool:
@@ -365,17 +412,70 @@ def desc_similarity(a: NameParts, b: NameParts) -> float:
     ca, cb = a.canon, b.canon
     ts = fuzz.token_set_ratio(ca, cb) / 100.0
     tso = fuzz.token_sort_ratio(ca, cb) / 100.0
-    sim = 0.5 * ts + 0.5 * tso
+    sim = 0.25 * ts + 0.75 * tso  # a name that is a subset of another is weaker evidence
     if min(len(a.words), len(b.words)) == 1 and len(set(a.words) ^ set(b.words)) > 0:
         sim *= 0.85  # a single generic word ("bracket") is weak evidence
     return sim
 
 
-def compare_names(a: NameParts, b: NameParts) -> NameMatch:
+class NameIndex:
+    """Corpus statistics used to discount generic descriptions.
+
+    A 'unit' is one distinct part number (files without a PN count individually), so
+    several copies of the same PN do not make its description look generic.
+    """
+
+    def __init__(self, items: dict[str, list[NameParts]], unit_of: dict[str, str] | None = None, k0: int = 3):
+        self.k0 = k0
+        self.postings: dict[str, set[str]] = defaultdict(set)
+        unit_of = unit_of or {}
+        for iid, sources in items.items():
+            unit = unit_of.get(iid) or f"id:{iid}"
+            for np_ in sources:
+                for t in set(np_.words) | set(np_.numbers):
+                    self.postings[t].add(unit)
+
+    def joint_count(self, tokens) -> int:
+        sets = sorted((self.postings.get(t, set()) for t in tokens), key=len)
+        if not sets:
+            return 0
+        acc = set(sets[0])
+        for st in sets[1:]:
+            acc &= st
+            if not acc:
+                break
+        return len(acc)
+
+    def specificity(self, a: NameParts, b: NameParts) -> tuple[float, int]:
+        """1.0 if at most k0 distinct parts carry the shared description, lower when it is generic."""
+        ta, tb = set(a.words) | set(a.numbers), set(b.words) | set(b.numbers)
+        shared = ta & tb
+        if not shared:  # typos: use the smaller name's tokens that have a close partner
+            small, big = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+            shared = {t for t in small if any(fuzz.ratio(t, u) >= 80 for u in big)}
+        m = self.joint_count(shared) if shared else 0
+        if m <= self.k0:
+            return 1.0, m
+        return math.sqrt(self.k0 / m), m
+
+
+def compare_names(a: NameParts, b: NameParts, index: "NameIndex | None" = None) -> NameMatch:
     pn_rel = _pn_relation(a, b)
     num_rel = _number_relation(a, b)
     ds = desc_similarity(a, b)
-    desc_score = ds * (0.5 if num_rel == "conflict" else 1.0)
+    desc_score = ds * {"conflict": 0.5, "partial": 0.9}.get(num_rel, 1.0)
+    mat_rel = "none"
+    if a.materials and b.materials:
+        mat_rel = "match" if set(a.materials) == set(b.materials) else "conflict"
+    elif a.materials or b.materials:
+        mat_rel = "partial"
+    desc_score *= {"conflict": 0.5, "partial": 0.9}.get(mat_rel, 1.0)
+    spec_note = "" if mat_rel == "none" else f"; materials={mat_rel}"
+    if index is not None and pn_rel not in ("same", "core") and desc_score > 0:
+        spec, m = index.specificity(a, b)
+        if spec < 1.0:
+            desc_score *= spec
+            spec_note += f"; generic description shared by {m} part numbers (x{spec:.2f})"
     if pn_rel == "same":
         score, why = 1.0, "same part number"
     elif pn_rel == "core":
@@ -386,16 +486,16 @@ def compare_names(a: NameParts, b: NameParts) -> NameMatch:
         score, why = min(1.0, desc_score + 0.05), "part numbers differ by one character"
     else:
         score, why = desc_score, "description similarity"
-    detail = f"{why}; desc_sim={ds:.2f}; numbers={num_rel}"
+    detail = f"{why}; desc_sim={ds:.2f}; numbers={num_rel}{spec_note}"
     return NameMatch(score=round(score, 4), pn_relation=pn_rel, desc_sim=round(ds, 4), number_relation=num_rel, detail=detail)
 
 
-def best_match(sources_a: list[NameParts], sources_b: list[NameParts]) -> NameMatch | None:
+def best_match(sources_a: list[NameParts], sources_b: list[NameParts], index: "NameIndex | None" = None) -> NameMatch | None:
     """Best comparison over all name sources of two items (file name, STEP product, ERP row)."""
     best: NameMatch | None = None
     for a in sources_a:
         for b in sources_b:
-            m = compare_names(a, b)
+            m = compare_names(a, b, index)
             if best is None or m.score > best.score:
                 best = m
     return best

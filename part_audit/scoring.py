@@ -17,7 +17,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from .names import NameMatch, NameParts, best_match, blocking_pairs
+from .names import NameIndex, NameMatch, NameParts, best_match, blocking_pairs
 
 # unit conversion factors that explain an exact uniform scale between two files
 UNIT_FACTORS = {
@@ -35,10 +35,13 @@ class Thresholds:
     near_max_type_dist: float = 0.25     # surface-type area-fraction L1 distance guard
     unit_tol: float = 1e-4         # tolerance on the scale factor for unit mismatches
     name_similar: float = 0.85     # L2 score for a name match
+    name_k0: int = 3               # L2: descriptions shared by more distinct PNs than this are discounted
     name_candidate: float = 0.70   # L2 score kept for context in reports
-    shape_near: float = 0.03       # L3b: aligned surface distance (p95 / bbox diagonal) for near-identical
-    shape_identical: float = 0.01  # L3b: above this an 'identical' by properties is downgraded
-    mirror_ratio: float = 0.5      # L3b: improper/proper alignment ratio below which -> mirror image
+    shape_same_excess50: float = 2.0   # L3b: 'identical' by properties is downgraded above this median excess
+    shape_near_excess50: float = 3.0   # L3b: near-identical needs median surface distance <= this x noise
+    shape_near_p95: float = 0.10       # L3b: ... and p95 surface distance <= this share of the size
+    mirror_ratio: float = 0.6          # L3b: improper/proper excess ratio below which -> mirror image
+    skew_min: float = 0.004            # L3: smallest |surface skewness| needed to trust the chirality sign
 
     def as_dict(self) -> dict:
         return dict(self.__dict__)
@@ -77,6 +80,7 @@ class GeoMatch:
     scale: float = 1.0
     unit_note: str = ""
     shape: dict | None = None   # L3b result, if computed
+    chirality: str = ""         # same | opposite | undetermined (from surface skewness)
     note: str = ""
 
 
@@ -120,6 +124,7 @@ def compare_geometry(fa: dict | None, fb: dict | None, th: Thresholds, scale: fl
                   _type_dist(fa, fb), scale)
     if scale != 1.0:
         gm.unit_note = UNIT_FACTORS.get(round(scale if scale > 1 else 1 / scale, 4), f"x{scale:g}")
+    gm.chirality = chirality_relation(fa, fb, th)
     if max_rel <= th.geo_exact or (max_rel <= th.geo_identical and topo_same):
         gm.relation = "unit_scaled" if scale != 1.0 else "identical"
         if not solid_ok:
@@ -128,6 +133,23 @@ def compare_geometry(fa: dict | None, fb: dict | None, th: Thresholds, scale: fl
         if gm.face_ratio <= th.near_max_face_ratio and gm.type_dist <= th.near_max_type_dist:
             gm.relation = "near"
     return gm
+
+
+def chirality_relation(fa: dict, fb: dict, th: Thresholds) -> str:
+    """'opposite' if the two parts have opposite handedness (mirror images), judged from the sign of
+    the product of the surface skewness along the principal axes; 'undetermined' when the part is
+    (nearly) symmetric or its principal axes are ambiguous."""
+    sa, sb, ea, eb = fa.get("surf_skew"), fb.get("surf_skew"), fa.get("surf_eig"), fb.get("surf_eig")
+    if not (sa and sb and ea and eb):
+        return "undetermined"
+    for e in (ea, eb):
+        l1, l2, l3 = (max(x, 1e-30) for x in e)
+        if (l1 - l2) / l1 < 0.02 or (l2 - l3) / l2 < 0.02:
+            return "undetermined"
+    if min(abs(x) for x in sa) < th.skew_min or min(abs(x) for x in sb) < th.skew_min:
+        return "undetermined"
+    pa, pb = sa[0] * sa[1] * sa[2], sb[0] * sb[1] * sb[2]
+    return "opposite" if pa * pb < 0 else "same"
 
 
 def geometry_candidates(items: dict[str, Item], th: Thresholds) -> dict[tuple[str, str], float]:
@@ -246,9 +268,9 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
     elif g and g.relation in ("identical", "unit_scaled"):
         p.geo_relation = g.relation
         shp = g.shape or {}
-        if shp.get("mirror"):
+        if shp.get("mirror") or g.chirality == "opposite":
             p.geo_relation = "mirror"
-        elif shp and shp.get("p95_rel", 0) > th.shape_identical and g.max_rel > th.geo_exact:
+        elif shp and shp.get("excess50", 0) > th.shape_same_excess50 and g.max_rel > th.geo_exact:
             p.geo_relation = "near"  # properties agree but the aligned shapes do not
         if p.geo_relation in ("identical", "unit_scaled"):
             base = 0.97 if g.max_rel <= th.geo_exact else 0.95
@@ -273,20 +295,28 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
         shp = g.shape
         if shp and shp.get("mirror"):
             p.geo_relation = "mirror"
-        elif shp and shp.get("p95_rel") is not None and shp["p95_rel"] > th.shape_near:
+        elif shp and (shp.get("excess50", 0) > th.shape_near_excess50 or shp.get("p95_rel", 0) > th.shape_near_p95):
             p.geo_relation = "different"
-            p.reason = f"properties within {_fmt_pct(g.max_rel)} but shapes differ (surface distance {shp['p95_rel']:.2%})"
+            p.reason = (f"properties within {_fmt_pct(g.max_rel)} but shapes differ (median surface distance "
+                        f"{shp['excess50']:.1f}x sampling noise, p95 {shp['p95_rel']:.1%} of size)")
         else:
             p.confidence = round(max(0.5, 0.9 - 0.4 * g.max_rel / th.geo_near), 3)
             bits = [f"geometry within {_fmt_pct(g.max_rel)} (volume {_fmt_pct(g.d_volume)}, area {_fmt_pct(g.d_area)}, "
                     f"inertia {_fmt_pct(g.d_inertia)}, bbox {_fmt_pct(g.d_bbox)})"]
             if shp and shp.get("p95_rel") is not None:
-                bits.append(f"aligned surface distance p95 {shp['p95_rel']:.2%} of size")
+                bits.append(f"aligned surface distance p95 {shp['p95_rel']:.2%} of size "
+                            f"(median {shp['excess50']:.1f}x sampling noise)")
             bits.append(f"faces {a.fp.get('n_faces')} vs {b.fp.get('n_faces')}")
             p.reason = "; ".join(bits) + " - small design change or different export; review"
     if p.geo_relation == "mirror":
         p.confidence = 0.8
-        p.reason = "same properties but mirror image (left/right-hand version?) - different parts"
+        how = []
+        if g is not None and g.chirality == "opposite":
+            how.append("opposite handedness (surface skewness)")
+        if g is not None and (g.shape or {}).get("mirror"):
+            how.append("a reflection aligns the surfaces, no rotation does")
+        p.reason = ("same size and properties but mirror image (left/right-hand version?) - different parts; "
+                    + ", ".join(how))
 
     # ---- category
     if p.geo_relation in ("identical", "unit_scaled"):
@@ -368,8 +398,9 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
                 get(ids[i], ids[j]).same_pn = True
     # L2
     name_items = {fid: it.sources for fid, it in items.items() if it.sources}
+    index = NameIndex(name_items, {fid: it.pn_key for fid, it in items.items() if it.pn_key}, k0=th.name_k0)
     for a, b in blocking_pairs(name_items):
-        m = best_match(items[a].sources, items[b].sources)
+        m = best_match(items[a].sources, items[b].sources, index)
         if m and m.score >= th.name_candidate:
             get(a, b).name = m
 
@@ -377,7 +408,7 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
     for (a, b), p in sorted(cand.items()):
         ia, ib = items[a], items[b]
         if p.name is None and ia.sources and ib.sources:
-            p.name = best_match(ia.sources, ib.sources)
+            p.name = best_match(ia.sources, ib.sources, index)
         if use_geometry and not p.l1:
             p.geo = compare_geometry(ia.fp, ib.fp, th, scales.get((a, b), 1.0))
             if shape_check is not None and p.geo.relation in ("identical", "unit_scaled", "near"):

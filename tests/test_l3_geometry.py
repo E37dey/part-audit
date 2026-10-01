@@ -77,11 +77,12 @@ def test_other_part_is_different(parts):
 def test_mirror_has_identical_properties_but_l3b_detects_it(parts):
     fps, cache = parts
     assert _geo(fps, "base", "mirror").relation == "identical"  # properties cannot see handedness
-    pa, pm, pr = (cache.get_samples(fps[k]["sha"]) for k in ("base", "mirror", "rotated"))
-    res = compare_point_sets(pa, pm, fps["base"]["surf_eig"], fps["mirror"]["surf_eig"])
-    assert res["mirror"] and res["improper_p50"] < 0.01
-    res2 = compare_point_sets(pa, pr, fps["base"]["surf_eig"], fps["rotated"]["surf_eig"])
-    assert not res2["mirror"] and res2["p50_rel"] < 0.01
+    pa, pm, pr = (cache.get_samples(fps[k]["sha"]) * fps[k]["sample_scale"] for k in ("base", "mirror", "rotated"))
+    area = fps["base"]["area"]
+    res = compare_point_sets(pa, pm, fps["base"]["surf_eig"], fps["mirror"]["surf_eig"], area)
+    assert res["mirror"] and res["improper_excess50"] < 1.5
+    res2 = compare_point_sets(pa, pr, fps["base"]["surf_eig"], fps["rotated"]["surf_eig"], area)
+    assert not res2["mirror"] and res2["excess50"] < 1.5 and res2["excess95"] < 1.5
 
 
 def test_pool_timeout_crash_and_errors():
@@ -111,4 +112,5 @@ def test_cache_roundtrip(tmp_path, parts):
     b = fingerprint_files([("p", str(p), "sha-p")], workers=1, timeout_s=30, cache_dir=str(tmp_path / "c"))
     assert a[2]["computed"] == 1 and b[2]["cached"] == 1
     assert math.isclose(a[0]["p"]["volume"], b[0]["p"]["volume"])
-    assert b[3].get_samples("sha-p").shape == (4096, 3)
+    pts = b[3].get_samples("sha-p")
+    assert pts.shape == (4096, 3) and abs(pts).max() <= 1.0  # stored relative to the bbox diagonal
