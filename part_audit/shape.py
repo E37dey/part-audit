@@ -78,22 +78,29 @@ def _gaps(eig) -> tuple[float, float]:
     return (l1 - l2) / l1, (l2 - l3) / l2
 
 
-def candidate_transforms(eig_a, eig_b, tol: float = 0.03, step_deg: float = 10.0) -> tuple[list[np.ndarray], str]:
-    """Transforms (applied to B in its canonical frame) that cover the frame ambiguity."""
+def candidate_transforms(eig_a, eig_b, tol: float = 0.03, step_deg: float = 5.0):
+    """Transforms (applied to B in its canonical frame) that cover the frame ambiguity.
+
+    Returns (list of (transform, axis, angle_deg, sign_matrix)), mode). ``axis`` is None when no
+    rotation search is needed."""
     ga, gb = _gaps(eig_a), _gaps(eig_b)
     amb12 = min(ga[0], gb[0]) < tol
     amb23 = min(ga[1], gb[1]) < tol
+    out = []
     if amb12 and amb23:
-        base = [np.eye(3)] + _RANDOM_ROTS
         mode = "isotropic"
+        for r in [np.eye(3)] + _RANDOM_ROTS:
+            out += [(r @ s, None, 0.0, s) for s in _SIGNS]
     elif amb12 or amb23:
         axis = 2 if amb12 else 0
-        base = [_rot(axis, math.radians(a)) for a in np.arange(0.0, 360.0, step_deg)]
         mode = "axis-12" if amb12 else "axis-23"
+        for a in np.arange(0.0, 360.0, step_deg):
+            r = _rot(axis, math.radians(a))
+            out += [(r @ s, axis, float(a), s) for s in _SIGNS]
     else:
-        base = [np.eye(3)]
         mode = "unique"
-    return [r @ s for r in base for s in _SIGNS], mode
+        out = [(s.copy(), None, 0.0, s) for s in _SIGNS]
+    return out, mode
 
 
 def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float, mirror_ratio: float = 0.6) -> dict:
@@ -108,13 +115,31 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
     nn_a = _NN(pa)
     transforms, mode = candidate_transforms(eig_a, eig_b)
     sub = pb[:: max(1, len(pb) // 1024)]  # coarse search on a subset
-    best = {+1: (math.inf, None), -1: (math.inf, None)}
-    for t in transforms:
-        d = float(np.median(nn_a.query(sub @ t.T)))
+
+    def score(t) -> float:  # mean NN distance: more sensitive to small features than the median
+        return float(nn_a.query(sub @ t.T).mean())
+
+    cands: dict[int, list] = {1: [], -1: []}
+    for t, axis, ang, sg in transforms:
         sgn = 1 if np.linalg.det(t) > 0 else -1
-        if d < best[sgn][0]:
-            best[sgn] = (d, t)
-    res = {"mode": mode, "n_transforms": len(transforms), "diag": diag, "noise95_rel": n95 / diag}
+        cands[sgn].append((score(t), t, axis, ang, sg))
+    n_eval = len(transforms)
+    best = {}
+    for sgn in (1, -1):
+        ranked = sorted(cands[sgn], key=lambda c: c[0])
+        best[sgn] = ranked[0]
+        if ranked[0][2] is None:
+            continue
+        # rotation search: refine the 3 best coarse angles (5 deg grid) in 0.5 deg steps, otherwise a
+        # rotated copy can look worse than a reflection that happens to fall on the grid
+        for d0, t0, axis, ang, sg in ranked[:3]:
+            for da in np.arange(-4.0, 4.01, 0.5):
+                t = _rot(axis, math.radians(ang + da)) @ sg
+                d = score(t)
+                n_eval += 1
+                if d < best[sgn][0]:
+                    best[sgn] = (d, t, axis, ang + da, sg)
+    res = {"mode": mode, "n_transforms": n_eval, "diag": diag, "noise95_rel": n95 / diag}
     for sgn, label in ((1, "proper"), (-1, "improper")):
         t = best[sgn][1]
         tb = pb @ t.T
@@ -130,8 +155,10 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
     res["p95_rel"] = res["proper_p95_rel"]
     strong = (res["improper_excess95"] < 1.5 and res["proper_excess95"] > 2.0
               and res["improper_excess95"] < mirror_ratio * res["proper_excess95"])
-    # subtle handedness: the reflection fits at noise level and clearly better than any rotation
-    subtle = res["improper_excess50"] < 1.2 and res["proper_excess50"] - res["improper_excess50"] > 0.4
+    # subtle handedness: the reflection fits at noise level and clearly better than any rotation; only
+    # trusted when the principal frame is unique (no rotation search that could miss the best angle)
+    subtle = (mode == "unique" and res["improper_excess50"] < 1.2
+              and res["proper_excess50"] - res["improper_excess50"] > 0.4)
     res["mirror"] = bool(strong or subtle)
     return res
 

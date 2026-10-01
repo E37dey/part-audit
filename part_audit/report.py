@@ -66,6 +66,8 @@ def _write_table(ws, rows: list[dict], columns: list[tuple[str, str, int]], star
     ws.freeze_panes = ws.cell(row=start_row + 1, column=1)
     if rows:
         ws.auto_filter.ref = f"A{start_row}:{get_column_letter(len(columns))}{r}"
+    else:
+        ws.cell(row=start_row + 1, column=1, value="(none)").font = Font(italic=True, color="666666")
     return r
 
 
@@ -118,8 +120,11 @@ def build_rows(res) -> dict[str, list[dict]]:
             g = p.geo
             shp = (g.shape if g else None) or {}
             ia, ib = items[p.a], items[p.b]
+            label = CATEGORY_LABEL.get(p.category, p.category)
+            if p.category == "conflict" and p.geo_relation == "near":
+                label = "Conflict: same part number, slightly different geometry (revision?)"
             nd.append({
-                "category": CATEGORY_LABEL.get(p.category, p.category), "geo_relation": p.geo_relation,
+                "category": label, "geo_relation": p.geo_relation,
                 "file_a": p.a, "file_b": p.b, "pn_a": ia.pn, "pn_b": ib.pn, "confidence": p.confidence,
                 "d_volume": _pct(g.d_volume) if g else None, "d_area": _pct(g.d_area) if g else None,
                 "d_inertia": _pct(g.d_inertia) if g else None, "d_bbox": _pct(g.d_bbox) if g else None,
@@ -288,8 +293,13 @@ def write_report(res, path: str | Path) -> Path:
         _metrics_sheet(ws, res.metrics)
     for w in wb.worksheets:
         w.sheet_view.zoomScale = 90
+        _print_setup(w, None if w.title in ("Summary", "Metrics") else (3 if w.title == "PartNumber_Mapping" else 1))
     wb.save(path)
     return path
+
+
+SECTION_FONT = Font(bold=True, size=12, color="1F3A5F")
+GREY_FONT = Font(color="666666", size=9)
 
 
 def _summary(ws, res, rows) -> None:
@@ -301,54 +311,96 @@ def _summary(ws, res, rows) -> None:
     geo_err = sum(1 for s in res.skipped if s.stage == "geometry")
     ws["A1"] = "Part Data Audit - summary"
     ws["A1"].font = TITLE_FONT
-    ws["A2"] = ("Demo on public/synthetic data. Read-only: nothing was written to any ERP. "
-                "All proposed mappings are pending human approval.")
-    lines = [
-        ("Scanned folder", res.config.root),
-        ("ERP file", res.config.erp_csv or "(none)"),
-        ("Run date", _dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
-        ("Tool version", __version__),
-        ("", ""),
-        ("STEP files analysed", n_files),
-        ("Files skipped / errors", len(res.skipped)),
-        ("   of which geometry errors/timeouts", geo_err),
-        ("ERP rows", len(res.erp_rows)),
-        ("", ""),
-        ("Duplicate groups (identical parts)", len(res.groups)),
-        ("Files in duplicate groups", n_in_groups),
-        ("Redundant files (could be removed after review)", n_in_groups - len(res.groups)),
-        ("Identical pairs", cats.get("identical", 0)),
-        ("Identical geometry but ERP attributes differ", cats.get("identical_attr_conflict", 0)),
-        ("Near-identical pairs (alert)", cats.get("near_identical", 0)),
-        ("Part-number conflicts (same PN, different geometry)", cats.get("conflict", 0)),
-        ("Same PN, geometry not compared", cats.get("conflict_unverified", 0)),
-        ("Similar names only", cats.get("name_similar", 0)),
-        ("Mirror-image pairs (left/right, not duplicates)", cats.get("mirror", 0)),
-        ("Name inconsistency rows", len(rows["Name_Inconsistencies"])),
-        ("Proposed PN mappings (pending approval)", len(res.mapping)),
-        ("ERP items without CAD file", sum(1 for r in rows["ERP_vs_CAD"] if r["status"] == "No CAD file found")),
-        ("CAD files not in ERP", sum(1 for r in rows["ERP_vs_CAD"] if r["status"] == "CAD file not in ERP")),
-        ("Possible duplicate ERP items (by description)", len(res.erp_duplicates)),
-        ("", ""),
-        ("Geometry layer", "on" if res.config.use_geometry else "off (names and hashes only)"),
-        ("Shape check (L3b)", "on" if res.config.use_geometry and res.config.shape_check else "off"),
-        ("LLM layer (L4)", "on: " + res.config.llm_endpoint if res.config.llm_endpoint else "off (default)"),
-        ("Workers", res.config.workers),
-        ("Per-file timeout (s)", res.config.timeout_s),
+    ws["A2"] = ("Read-only audit: nothing was written to any ERP or CAD system. Every proposed part-number "
+                "change is pending human approval in the PartNumber_Mapping sheet.")
+    ws.merge_cells("A2:C2")
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[2].height = 30
+
+    findings = [
+        ("STEP files analysed", n_files, ""),
+        ("Files skipped or failed", len(res.skipped), f"{geo_err} geometry errors/timeouts - see Errors_Skipped"),
+        ("ERP rows", len(res.erp_rows), ""),
+        ("Duplicate groups (identical parts)", len(res.groups), "Duplicate_Groups"),
+        ("Files in duplicate groups", n_in_groups, f"{n_in_groups - len(res.groups)} could be retired after review"),
+        ("Proposed part-number mappings", len(res.mapping), "PartNumber_Mapping - pending approval"),
+        ("Near-identical pairs (alert, never merged)", cats.get("near_identical", 0), "Near_Duplicates"),
+        ("Part-number conflicts (same PN, different geometry)", cats.get("conflict", 0), "Name_Inconsistencies"),
+        ("Identical geometry, but materials differ", cats.get("identical_attr_conflict", 0), "Near_Duplicates"),
+        ("Mirror-image pairs (left/right, not duplicates)", cats.get("mirror", 0), "Near_Duplicates"),
+        ("Same PN in files whose geometry could not be compared", cats.get("conflict_unverified", 0), ""),
+        ("Similar names, different or unknown geometry", cats.get("name_similar", 0), "Name_Inconsistencies"),
+        ("Name inconsistency rows", len(rows["Name_Inconsistencies"]), "Name_Inconsistencies"),
+        ("ERP items without a CAD file", sum(1 for r in rows["ERP_vs_CAD"] if r["status"] == "No CAD file found"), "ERP_vs_CAD"),
+        ("CAD files not in the ERP", sum(1 for r in rows["ERP_vs_CAD"] if r["status"] == "CAD file not in ERP"), "ERP_vs_CAD"),
+        ("Possible duplicate ERP items (same description)", len(res.erp_duplicates), "ERP_vs_CAD"),
     ]
-    for k, v in sorted(res.timings.items()):
-        lines.append((f"time: {k}", round(v, 3) if isinstance(v, float) else v))
-    for k, v in res.config.thresholds.as_dict().items():
-        lines.append((f"threshold: {k}", v))
+    how = [
+        "1. Duplicate_Groups: each group is one physical part saved several times; check the evidence column.",
+        "2. PartNumber_Mapping: for groups with several part numbers, approve (Y) or reject (N) the proposed PN.",
+        "3. Near_Duplicates: small design changes, other-material copies and mirror images - review, never merge blindly.",
+        "4. Name_Inconsistencies: same part under different names/PNs, and same PN used for different geometry.",
+        "5. ERP_vs_CAD: ERP items without CAD and CAD files without an ERP item.",
+    ]
+    run = [
+        ("Scanned folder", res.config.root), ("ERP file", res.config.erp_csv or "(none)"),
+        ("Run date", _dt.datetime.now().strftime("%Y-%m-%d %H:%M")), ("Tool version", __version__),
+        ("Geometry layer (L3)", "on" if res.config.use_geometry else "off (names and hashes only)"),
+        ("Shape check (L3b)", "on" if res.config.use_geometry and res.config.shape_check else "off"),
+        ("LLM layer (L4)", ("on: " + res.config.llm_endpoint) if res.config.llm_endpoint else "off (default, no network use)"),
+        ("Worker processes", res.config.workers), ("Per-file timeout (s)", res.config.timeout_s),
+    ]
     r = 4
-    for k, v in lines:
-        ws.cell(row=r, column=1, value=k)
+    ws.cell(row=r, column=1, value="Findings").font = SECTION_FONT
+    r += 1
+    for k, v, where in findings:
+        ws.cell(row=r, column=1, value=k).font = BOLD
         ws.cell(row=r, column=2, value=v)
-        if k and not k.startswith(("time:", "threshold:", "   ")):
-            ws.cell(row=r, column=1).font = BOLD
+        ws.cell(row=r, column=3, value=where).font = GREY_FONT
+        ws.cell(row=r, column=3).alignment = Alignment(indent=1)
         r += 1
-    ws.column_dimensions["A"].width = 52
-    ws.column_dimensions["B"].width = 60
+    r += 1
+    ws.cell(row=r, column=1, value="How to use this report").font = SECTION_FONT
+    r += 1
+    for line in how:
+        ws.cell(row=r, column=1, value=line)
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+        r += 1
+    r += 1
+    ws.cell(row=r, column=1, value="Run").font = SECTION_FONT
+    r += 1
+    for k, v in run:
+        ws.cell(row=r, column=1, value=k).font = BOLD
+        ws.cell(row=r, column=2, value=v)
+        r += 1
+    r += 1
+    ws.cell(row=r, column=1, value="Timings (seconds) and thresholds").font = SECTION_FONT
+    r += 1
+    for k, v in sorted(res.timings.items()):
+        ws.cell(row=r, column=1, value=f"time: {k}").font = GREY_FONT
+        ws.cell(row=r, column=2, value=round(v, 2) if isinstance(v, float) else v).font = GREY_FONT
+        r += 1
+    for k, v in res.config.thresholds.as_dict().items():
+        ws.cell(row=r, column=1, value=f"threshold: {k}").font = GREY_FONT
+        ws.cell(row=r, column=2, value=v).font = GREY_FONT
+        r += 1
+    ws.column_dimensions["A"].width = 55
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 60
+    for row in ws.iter_rows(min_row=5, max_row=4 + len(findings), min_col=2, max_col=2):
+        for c in row:
+            c.alignment = Alignment(horizontal="right")
+
+
+def _print_setup(ws, header_row: int | None) -> None:
+    """Landscape A4, fit to one page wide, header row repeated - so the report prints usefully."""
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    if header_row:
+        ws.print_title_rows = f"{header_row}:{header_row}"
 
 
 def _band_groups(ws, rows) -> None:

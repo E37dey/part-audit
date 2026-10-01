@@ -14,11 +14,10 @@ dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",
     "rapidfuzz>=3.0",
+    "scipy>=1.10",        # KD-tree for the L3b surface check (numpy fallback exists)
 ]
 
 [project.optional-dependencies]
-# Only needed to regenerate the synthetic test sets (tools/), not to run an audit.
-data = ["cadquery>=2.4", "trimesh>=4.0"]
 dev = ["pytest>=7"]
 
 [project.scripts]
