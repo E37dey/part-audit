@@ -53,3 +53,19 @@ def test_local_endpoint_gets_names_only(tmp_path):
         assert "PA-20871" in sent and "ISO-10303" not in sent and str(root) not in sent
     finally:
         srv.shutdown()
+
+
+def test_local_endpoint_ignores_proxy_settings(tmp_path, monkeypatch):
+    """With HTTP(S)_PROXY set, data for a localhost endpoint must still go straight to localhost."""
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")    # nothing listens there
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    srv = HTTPServer(("127.0.0.1", 0), _Fake)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    try:
+        from part_audit.llm import chat
+        assert chat(f"http://127.0.0.1:{srv.server_port}/v1", "m", "hi") == "Same bracket saved under two numbers."
+    finally:
+        srv.shutdown()

@@ -34,7 +34,9 @@ def chat(endpoint: str, model: str, prompt: str, timeout: float = 60.0) -> str:
                                     {"role": "user", "content": prompt}]}).encode("utf-8")
     url = endpoint.rstrip("/") + "/chat/completions"
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (user-configured endpoint)
+    # never route through HTTP(S)_PROXY: a local endpoint must stay on this machine
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(req, timeout=timeout) as resp:  # noqa: S310 (user-configured endpoint)
         data = json.loads(resp.read().decode("utf-8"))
     return data["choices"][0]["message"]["content"].strip()
 
