@@ -65,7 +65,8 @@ class _NN:
 
     def query(self, q: np.ndarray) -> np.ndarray:
         if self.tree is not None:
-            return self.tree.query(q, k=1)[0]
+            # thread pool only pays off for the full 4096-point queries
+            return self.tree.query(q, k=1, workers=-1 if len(q) >= 2048 else 1)[0]
         out = np.empty(len(q))
         for i in range(0, len(q), 512):  # brute force fallback
             d = ((q[i:i + 512, None, :] - self.pts[None, :, :]) ** 2).sum(-1)
@@ -114,20 +115,24 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
     n50, n95 = NOISE50 * spacing, NOISE95 * spacing
     nn_a = _NN(pa)
     transforms, mode = candidate_transforms(eig_a, eig_b)
-    sub = pb[:: max(1, len(pb) // 1024)]  # coarse search on a subset
+    sub = pb[:: max(1, len(pb) // 1024)]     # refinement subset
+    coarse = pb[:: max(1, len(pb) // 256)]   # coarse-grid subset
 
-    def score(t) -> float:  # mean NN distance: more sensitive to small features than the median
-        return float(nn_a.query(sub @ t.T).mean())
+    def score(t, pts=sub) -> float:  # mean NN distance: more sensitive to small features than the median
+        return float(nn_a.query(pts @ t.T).mean())
 
     cands: dict[int, list] = {1: [], -1: []}
     for t, axis, ang, sg in transforms:
         sgn = 1 if np.linalg.det(t) > 0 else -1
-        cands[sgn].append((score(t), t, axis, ang, sg))
+        cands[sgn].append((score(t, coarse if len(transforms) > 8 else sub), t, axis, ang, sg))
     n_eval = len(transforms)
     best = {}
     for sgn in (1, -1):
         ranked = sorted(cands[sgn], key=lambda c: c[0])
         best[sgn] = ranked[0]
+        if len(transforms) > 8:  # rescore the coarse winners on the larger subset
+            ranked = sorted(((score(c[1]),) + c[1:] for c in ranked[:6]), key=lambda c: c[0])
+            best[sgn] = ranked[0]
         if ranked[0][2] is None:
             continue
         # rotation search: refine the 3 best coarse angles (5 deg grid) in 0.5 deg steps, otherwise a
@@ -163,16 +168,67 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
     return res
 
 
-class ShapeChecker:
-    """Callable used by scoring.build_pairs for candidate pairs (lazy, memoised)."""
+def _job_args(ia, ib, geo, mirror_ratio):
+    fa, fb = ia.fp or {}, ib.fp or {}
+    if not (fa.get("has_samples") and fb.get("has_samples") and fa.get("sha") and fb.get("sha")):
+        return None
+    return (fa["sha"], fa["sample_scale"], fb["sha"], fb["sample_scale"], 1.0 if geo is None else geo.scale,
+            fa.get("surf_eig", [1, 1, 1]), fb.get("surf_eig", [1, 1, 1]),
+            fa.get("sample_area") or fa.get("area", 0.0), mirror_ratio)
 
-    def __init__(self, cache, thresholds, max_memo: int = 2000):
+
+_WORKER_CACHE = None
+
+
+def _init_worker(cache_dir):
+    global _WORKER_CACHE
+    from .geometry import FingerprintCache
+    _WORKER_CACHE = FingerprintCache(cache_dir)
+
+
+def _run_job(args):
+    sha_a, sc_a, sha_b, sc_b, scale, eig_a, eig_b, area, ratio = args
+    pa, pb = _WORKER_CACHE.get_samples(sha_a), _WORKER_CACHE.get_samples(sha_b)
+    if pa is None or pb is None:
+        return None
+    return compare_point_sets(pa * sc_a, pb * sc_b * scale, eig_a, eig_b, area, ratio)
+
+
+class ShapeChecker:
+    """Callable used by scoring.build_pairs for candidate pairs (lazy, memoised).
+
+    ``prefetch`` runs many checks in worker processes (they read the samples from the SQLite cache)."""
+
+    def __init__(self, cache, thresholds, max_memo: int = 2000, workers: int = 1, cache_dir: str | None = None):
         self.cache = cache
         self.th = thresholds
         self.memo: dict[str, np.ndarray | None] = {}
         self.max_memo = max_memo
         self.n_checks = 0
         self.seconds = 0.0
+        self.workers = workers
+        self.cache_dir = cache_dir
+        self.done: dict[tuple, dict | None] = {}
+
+    def prefetch(self, jobs) -> None:
+        if self.workers <= 1 or not self.cache_dir or len(jobs) < 20:
+            return
+        import multiprocessing as mp
+        import sys as _sys
+        keyed = []
+        for ia, ib, geo in jobs:
+            args = _job_args(ia, ib, geo, self.th.mirror_ratio)
+            if args is not None:
+                keyed.append(((ia.file_id, ib.file_id, args[4]), args))
+        if not keyed:
+            return
+        t0 = time.perf_counter()
+        ctx = mp.get_context("fork" if _sys.platform.startswith("linux") else "spawn")
+        with ctx.Pool(self.workers, initializer=_init_worker, initargs=(self.cache_dir,)) as pool:
+            for (key, _), res in zip(keyed, pool.imap(_run_job, [a for _, a in keyed], chunksize=8)):
+                self.done[key] = res
+        self.n_checks += len(keyed)
+        self.seconds += time.perf_counter() - t0
 
     def _points(self, item):
         fp = item.fp or {}
@@ -187,6 +243,9 @@ class ShapeChecker:
         return self.memo[sha]
 
     def __call__(self, ia, ib, geo) -> dict | None:
+        key = (ia.file_id, ib.file_id, 1.0 if geo is None else geo.scale)
+        if key in self.done:
+            return self.done[key]
         pa, pb = self._points(ia), self._points(ib)
         if pa is None or pb is None:
             return None

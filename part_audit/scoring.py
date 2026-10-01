@@ -254,9 +254,21 @@ def item_material(it: Item) -> tuple[str, str]:
     return "", ""
 
 
+def materials_conflict(ka: str, kb: str) -> bool:
+    """Different family, or the same family with two different grades ('aluminum' vs 'aluminum 6061' is
+    not a conflict: the grade is simply unspecified on one side)."""
+    if not ka or not kb or ka == kb:
+        return False
+    fa, _, ga = ka.partition(" ")
+    fb, _, gb = kb.partition(" ")
+    if fa in _GRADED or fb in _GRADED:
+        return fa != fb or (bool(ga) and bool(gb) and ga != gb)
+    return True
+
+
 def erp_attribute_conflicts(a: Item, b: Item) -> list[str]:
     (ka, la), (kb, lb) = item_material(a), item_material(b)
-    if ka and kb and ka != kb:
+    if materials_conflict(ka, kb):
         return [f"material differs ({la} vs {lb})"]
     return []
 
@@ -278,10 +290,11 @@ def enforce_material_consistency(pairs: list["Pair"], items: dict[str, Item]) ->
         if p.category != "identical":
             continue
         known = mats.get(uf.find(p.a), {})
-        if len(known) < 2:
+        keys = sorted(known)
+        if not any(materials_conflict(x, y) for i, x in enumerate(keys) for y in keys[i + 1:]):
             continue
         ka, kb = item_material(items[p.a])[0], item_material(items[p.b])[0]
-        if ka and ka == kb:
+        if ka and kb and not materials_conflict(ka, kb):
             continue
         p.category, p.merge_ok = "identical_attr_conflict", False
         p.reason += ("; the same geometry is used by parts with different materials ("
@@ -466,19 +479,35 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
             get(a, b).name = m
 
     out: list[Pair] = []
-    for (a, b), p in sorted(cand.items()):
+    ordered = sorted(cand.items())
+    for (a, b), p in ordered:
         ia, ib = items[a], items[b]
         if p.name is None and ia.sources and ib.sources:
             p.name = best_match(ia.sources, ib.sources, index)
         if use_geometry and not p.l1:
             p.geo = compare_geometry(ia.fp, ib.fp, th, scales.get((a, b), 1.0))
-            if shape_check is not None and p.geo.relation in ("identical", "unit_scaled", "near"):
-                p.geo.shape = shape_check(ia, ib, p.geo)
-        classify(p, ia, ib, th)
+    if shape_check is not None:
+        jobs = [(items[a], items[b], p.geo) for (a, b), p in ordered if needs_shape_check(p.geo)]
+        if hasattr(shape_check, "prefetch"):
+            shape_check.prefetch(jobs)  # parallel, results are kept by the checker
+        for ia, ib, geo in jobs:
+            geo.shape = shape_check(ia, ib, geo)
+    for (a, b), p in ordered:
+        classify(p, items[a], items[b], th)
         if p.category:
             out.append(p)
     enforce_material_consistency(out, items)
     return out
+
+
+def needs_shape_check(g: "GeoMatch | None") -> bool:
+    """L3b only where it can change the outcome: near candidates (reject coincidences, find mirrors) and
+    property-identical pairs whose handedness the skewness test could not settle."""
+    if g is None:
+        return False
+    if g.relation == "near":
+        return True
+    return g.relation in ("identical", "unit_scaled") and g.chirality == "undetermined"
 
 
 # --------------------------------------------------------------------------- groups

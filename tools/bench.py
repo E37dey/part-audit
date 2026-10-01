@@ -64,7 +64,8 @@ def main() -> None:
         "size_kb_median": round(sizes[len(sizes) // 2] / 1024, 1), "size_kb_max": round(sizes[-1] / 1024, 1),
         "workers": a.workers, "cpu_count": os.cpu_count(), "timeout_s": a.timeout,
         "wall_s_total": round(wall, 1), "wall_min_total": round(wall / 60, 2),
-        "stage_s": {k: round(v, 1) for k, v in tm.items() if k.endswith("_s")},
+        "stage_s": {k: round(tm[k], 1) for k in ("scan_s", "geometry_s", "scoring_s", "shape_s", "total_s") if k in tm},
+        "shape_checks": tm.get("shape_checks"),
         "geometry_per_file_s": {k.replace("geometry_per_file_", ""): round(v, 3) for k, v in tm.items()
                                 if k.startswith("geometry_per_file_")},
         "seconds_per_file_wall": round(wall / a.n, 3),

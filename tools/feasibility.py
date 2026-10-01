@@ -13,6 +13,8 @@ import statistics
 import time
 from pathlib import Path
 
+import sys as _sys
+_sys.path[:0] = [str(Path(__file__).resolve().parents[1])]
 from part_audit.geometry import fingerprint_files
 
 

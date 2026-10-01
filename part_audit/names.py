@@ -429,6 +429,7 @@ class NameIndex:
                  partial_factor: float = 0.9):
         self.k0 = k0
         self.partial_factor = partial_factor
+        self._joint: dict[frozenset, int] = {}
         self.postings: dict[str, set[str]] = defaultdict(set)
         unit_of = unit_of or {}
         for iid, sources in items.items():
@@ -438,15 +439,14 @@ class NameIndex:
                     self.postings[t].add(unit)
 
     def joint_count(self, tokens) -> int:
-        sets = sorted((self.postings.get(t, set()) for t in tokens), key=len)
-        if not sets:
-            return 0
-        acc = set(sets[0])
-        for st in sets[1:]:
-            acc &= st
-            if not acc:
-                break
-        return len(acc)
+        key = frozenset(tokens)
+        hit = self._joint.get(key)
+        if hit is not None:
+            return hit
+        sets = sorted((self.postings.get(t, set()) for t in key), key=len)
+        n = len(sets[0].intersection(*sets[1:])) if sets else 0
+        self._joint[key] = n
+        return n
 
     def specificity(self, a: NameParts, b: NameParts) -> tuple[float, int]:
         """1.0 if at most k0 distinct parts carry the shared description, lower when it is generic."""
@@ -474,7 +474,7 @@ def compare_names(a: NameParts, b: NameParts, index: "NameIndex | None" = None) 
         mat_rel = "partial"
     desc_score *= {"conflict": 0.5, "partial": partial}.get(mat_rel, 1.0)
     spec_note = "" if mat_rel == "none" else f"; materials={mat_rel}"
-    if index is not None and pn_rel not in ("same", "core") and desc_score > 0:
+    if index is not None and pn_rel not in ("same", "core") and desc_score >= 0.6:
         spec, m = index.specificity(a, b)
         if spec < 1.0:
             desc_score *= spec

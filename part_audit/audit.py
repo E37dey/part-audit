@@ -155,7 +155,7 @@ def run_audit(cfg: AuditConfig) -> AuditResult:
                   f"({timings['geometry_s']:.1f}s)")
         if cfg.shape_check:
             from .shape import ShapeChecker
-            shape_fn = ShapeChecker(fp_cache, cfg.thresholds)
+            shape_fn = ShapeChecker(fp_cache, cfg.thresholds, workers=cfg.workers, cache_dir=cfg.cache_dir)
 
     t2 = time.perf_counter()
     pairs = build_pairs(items, cfg.thresholds, use_geometry=cfg.use_geometry, shape_check=shape_fn)

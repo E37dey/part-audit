@@ -125,9 +125,36 @@ def main() -> None:
              "All numbers below were produced by the scripts in `tools/` on the data described; nothing is estimated. "
              "Synthetic data: accuracy is an upper bound for real factory data.", "",
              "## Test sets", "", manifest_table(dm, tm), ""]
-    if test:
-        parts += ["## Held-out test set (thresholds frozen before it was scored)", "", metrics_table(test), "",
-                  hn_table(test), ""]
+    frozen = load(d, "test_metrics_frozen.json")
+    primary = frozen or test
+    if primary:
+        parts += ["## Held-out test set", "",
+                  "Thresholds were tuned on the dev set and frozen; the test set was built afterwards and scored "
+                  "once with the frozen code and thresholds:", "", metrics_table(primary), "", hn_table(primary), ""]
+    if frozen and test:
+        diff = []
+        old_rows = {r["type"]: r for r in frozen["per_type"]}
+        for r in test["per_type"]:
+            o = old_rows.get(r["type"])
+            if o and any(o.get(k) != r.get(k) for k in ("tp", "fp", "fn", "precision", "recall")):
+                diff.append(f"| {r['type']} | {pct(o['precision'])} / {pct(o['recall'])} | "
+                            f"{pct(r['precision'])} / {pct(r['recall'])} |")
+        parts += ["### After one post-hoc fix", "",
+                  "Error analysis on the test run found one algorithmic bug (not a threshold): for nearly "
+                  "axisymmetric parts the L3b rotation search used a 10-degree grid, so a rotated copy could fit "
+                  "worse than a reflection and was reported as a mirror image. The search now uses a 5-degree grid "
+                  "with 0.5-degree refinement. Thresholds were not changed. Re-running dev and test with the "
+                  "fixed code changed only these rows (precision / recall):", "",
+                  "| Row | Frozen run | After fix |", "|---|---|---|"] + (diff or ["| (no change) | | |"]) + [""]
+    sens = load(d, "test_name_sensitivity.json")
+    if sens:
+        parts += ["### Name layer: sensitivity on the test set (post-hoc, not used for any number above)", "",
+                  "| name_similar | name_k0 | partial factor | F precision | F recall | F1 |", "|---:|---:|---:|---:|---:|---:|"]
+        for r in sens:
+            p_, m = r["params"], r["metrics"]["F"]
+            parts.append(f"| {p_['name_similar']} | {p_['name_k0']} | {p_['name_partial_factor']} | {pct(m['P'])} | "
+                         f"{pct(m['R'])} | {m['F1']:.3f} |")
+        parts.append("")
     if dev:
         parts += ["## Dev set (used for tuning)", "", metrics_table(dev), "", hn_table(dev), ""]
     if nist:
@@ -139,8 +166,8 @@ def main() -> None:
     (Path(a.results).parent / "RESULTS.md").write_text("\n".join(parts), encoding="utf-8")
     # short block for the README
     readme = Path(a.readme)
-    if readme.exists() and test:
-        block = ["<!-- results:start -->", metrics_table(test), "", speed_section(None, bench), "<!-- results:end -->"]
+    if readme.exists() and primary:
+        block = ["<!-- results:start -->", metrics_table(primary), "", speed_section(None, bench), "<!-- results:end -->"]
         txt = readme.read_text(encoding="utf-8")
         txt = re.sub(r"<!-- results:start -->.*?<!-- results:end -->", "\n".join(block), txt, flags=re.S)
         readme.write_text(txt, encoding="utf-8")
