@@ -27,7 +27,7 @@ from collections import deque
 from multiprocessing.connection import wait
 from pathlib import Path
 
-FP_VERSION = 5
+FP_VERSION = 7
 
 SURFACE_NAMES = {
     "GeomAbs_Plane": "plane", "GeomAbs_Cylinder": "cylinder", "GeomAbs_Cone": "cone", "GeomAbs_Sphere": "sphere",
@@ -85,6 +85,85 @@ def _map(shape, kind):
     return m
 
 
+def _dir_key(d, tol: float = 1e-6):
+    v = [d.X(), d.Y(), d.Z()]
+    k = next(i for i in range(3) if abs(v[i]) > tol)
+    if v[k] < 0:
+        v = [-x for x in v]
+    return tuple(round(x, 5) for x in v), v
+
+
+def surface_key(ad, st: str, q: float, idx: int):
+    """Hashable identity of the underlying analytic surface (lengths quantised by q)."""
+    def r(x):
+        return int(round(x / q))
+    if st == "plane":
+        ax = ad.Plane().Axis()
+        dk, v = _dir_key(ax.Direction())
+        p = ax.Location()
+        return ("plane", dk, r(v[0] * p.X() + v[1] * p.Y() + v[2] * p.Z()))
+    if st == "cylinder":
+        c = ad.Cylinder()
+        dk, v = _dir_key(c.Axis().Direction())
+        p = c.Axis().Location()
+        t = v[0] * p.X() + v[1] * p.Y() + v[2] * p.Z()
+        p0 = (p.X() - t * v[0], p.Y() - t * v[1], p.Z() - t * v[2])  # axis point closest to the origin
+        return ("cylinder", dk, tuple(r(x) for x in p0), r(c.Radius()))
+    if st == "cone":
+        c = ad.Cone()
+        dk, _ = _dir_key(c.Axis().Direction())
+        a = c.Apex()
+        return ("cone", dk, r(a.X()), r(a.Y()), r(a.Z()), round(c.SemiAngle(), 6))
+    if st == "sphere":
+        c = ad.Sphere()
+        p = c.Location()
+        return ("sphere", r(p.X()), r(p.Y()), r(p.Z()), r(c.Radius()))
+    if st == "torus":
+        c = ad.Torus()
+        dk, _ = _dir_key(c.Axis().Direction())
+        p = c.Location()
+        return ("torus", dk, r(p.X()), r(p.Y()), r(p.Z()), r(c.MajorRadius()), r(c.MinorRadius()))
+    return ("face", idx)  # free-form faces are each counted
+
+
+def drop_stray_sheets(shape, max_share: float = 0.05):
+    """Remove small *open* shells (annotation planes, construction sheets that some AP242 exporters put
+    inside a solid). They barely change area but break the closed flag, the volume integral and the
+    bounding box. Returns (shape, number of shells removed). Closed shells (incl. voids) are kept."""
+    from OCP.BRep import BRep_Builder, BRep_Tool
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_SHELL, TopAbs_SOLID
+    from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Solid
+
+    shells = _map(shape, TopAbs_SHELL)
+    if shells.Extent() < 2:
+        return shape, 0
+    info = []
+    for i in range(1, shells.Extent() + 1):
+        sh = TopoDS.Shell_s(shells.FindKey(i))
+        g = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(sh, g)
+        info.append((sh, abs(g.Mass()), BRep_Tool.IsClosed_s(sh)))
+    total = sum(a for _, a, _ in info) or 1.0
+    keep = [sh for sh, a, closed in info if closed or a / total >= max_share]
+    n_drop = len(info) - len(keep)
+    if n_drop == 0 or not keep:
+        return shape, 0
+    b = BRep_Builder()
+    if _map(shape, TopAbs_SOLID).Extent() > 0 and all(BRep_Tool.IsClosed_s(k) for k in keep):
+        solid = TopoDS_Solid()
+        b.MakeSolid(solid)
+        for sh in keep:
+            b.Add(solid, sh)
+        return solid, n_drop
+    comp = TopoDS_Compound()
+    b.MakeCompound(comp)
+    for sh in keep:
+        b.Add(comp, sh)
+    return comp, n_drop
+
+
 def shape_fingerprint(shape) -> dict:
     """Compute the fingerprint of an OCC shape."""
     import numpy as np
@@ -96,11 +175,12 @@ def shape_fingerprint(shape) -> dict:
     from OCP.TopoDS import TopoDS
 
     t0 = time.perf_counter()
+    shape, n_stray = drop_stray_sheets(shape)
     solids, shells = _map(shape, TopAbs_SOLID), _map(shape, TopAbs_SHELL)
     faces, edges, verts = _map(shape, TopAbs_FACE), _map(shape, TopAbs_EDGE), _map(shape, TopAbs_VERTEX)
     fp: dict = {
         "n_solids": solids.Extent(), "n_shells": shells.Extent(), "n_faces": faces.Extent(),
-        "n_edges": edges.Extent(), "n_vertices": verts.Extent(),
+        "n_edges": edges.Extent(), "n_vertices": verts.Extent(), "stray_sheets_ignored": n_stray,
     }
     closed = shells.Extent() > 0
     for i in range(1, shells.Extent() + 1):
@@ -112,20 +192,32 @@ def shape_fingerprint(shape) -> dict:
     counts: dict[str, int] = {}
     areas: dict[str, float] = {}
     total_area = 0.0
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    box = Bnd_Box()
+    BRepBndLib.Add_s(shape, box, False)
+    x0, y0, z0, x1, y1, z1 = box.Get() if not box.IsVoid() else (0, 0, 0, 1, 1, 1)
+    q = 1e-5 * (math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2) or 1.0)
+    unique: dict[str, set] = {}
     for i in range(1, faces.Extent() + 1):
         f = TopoDS.Face_s(faces.FindKey(i))
         try:
-            st = SURFACE_NAMES.get(BRepAdaptor_Surface(f).GetType().name, "other")
+            ad = BRepAdaptor_Surface(f)
+            st = SURFACE_NAMES.get(ad.GetType().name, "other")
+            key = surface_key(ad, st, q, i)
         except Exception:
-            st = "other"
+            st, key = "other", ("face", i)
         g = GProp_GProps()
         BRepGProp.SurfaceProperties_s(f, g)
         a = abs(g.Mass())
         counts[st] = counts.get(st, 0) + 1
         areas[st] = areas.get(st, 0.0) + a
+        unique.setdefault(st, set()).add(key)
         total_area += a
     fp["area"] = total_area
     fp["surf_counts"] = dict(sorted(counts.items()))
+    # faces lying on the same plane / cylinder / ... count once: unchanged when a CAD system splits faces
+    fp["unique_surfaces"] = {k: len(v) for k, v in sorted(unique.items())}
     fp["surf_area_frac"] = {k: (v / total_area if total_area > 0 else 0.0) for k, v in sorted(areas.items())}
 
     vp = GProp_GProps()

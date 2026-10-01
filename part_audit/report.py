@@ -34,6 +34,7 @@ CATEGORY_LABEL = {
     "conflict": "Conflict: same part number, different geometry",
     "conflict_unverified": "Same part number, geometry not compared",
     "name_similar": "Similar names only",
+    "mirror": "Mirror image (left/right-hand part) - not a duplicate",
 }
 
 
@@ -113,7 +114,7 @@ def build_rows(res) -> dict[str, list[dict]]:
     # Near duplicates and geometry conflicts
     nd = []
     for p in res.pairs:
-        if p.category in ("near_identical", "conflict", "identical_attr_conflict") or p.geo_relation == "mirror":
+        if p.category in ("near_identical", "conflict", "identical_attr_conflict", "mirror"):
             g = p.geo
             shp = (g.shape if g else None) or {}
             ia, ib = items[p.a], items[p.b]
@@ -322,6 +323,7 @@ def _summary(ws, res, rows) -> None:
         ("Part-number conflicts (same PN, different geometry)", cats.get("conflict", 0)),
         ("Same PN, geometry not compared", cats.get("conflict_unverified", 0)),
         ("Similar names only", cats.get("name_similar", 0)),
+        ("Mirror-image pairs (left/right, not duplicates)", cats.get("mirror", 0)),
         ("Name inconsistency rows", len(rows["Name_Inconsistencies"])),
         ("Proposed PN mappings (pending approval)", len(res.mapping)),
         ("ERP items without CAD file", sum(1 for r in rows["ERP_vs_CAD"] if r["status"] == "No CAD file found")),

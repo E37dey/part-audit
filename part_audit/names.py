@@ -425,8 +425,10 @@ class NameIndex:
     several copies of the same PN do not make its description look generic.
     """
 
-    def __init__(self, items: dict[str, list[NameParts]], unit_of: dict[str, str] | None = None, k0: int = 3):
+    def __init__(self, items: dict[str, list[NameParts]], unit_of: dict[str, str] | None = None, k0: int = 3,
+                 partial_factor: float = 0.9):
         self.k0 = k0
+        self.partial_factor = partial_factor
         self.postings: dict[str, set[str]] = defaultdict(set)
         unit_of = unit_of or {}
         for iid, sources in items.items():
@@ -463,13 +465,14 @@ def compare_names(a: NameParts, b: NameParts, index: "NameIndex | None" = None) 
     pn_rel = _pn_relation(a, b)
     num_rel = _number_relation(a, b)
     ds = desc_similarity(a, b)
-    desc_score = ds * {"conflict": 0.5, "partial": 0.9}.get(num_rel, 1.0)
+    partial = index.partial_factor if index is not None else 0.9
+    desc_score = ds * {"conflict": 0.5, "partial": partial}.get(num_rel, 1.0)
     mat_rel = "none"
     if a.materials and b.materials:
         mat_rel = "match" if set(a.materials) == set(b.materials) else "conflict"
     elif a.materials or b.materials:
         mat_rel = "partial"
-    desc_score *= {"conflict": 0.5, "partial": 0.9}.get(mat_rel, 1.0)
+    desc_score *= {"conflict": 0.5, "partial": partial}.get(mat_rel, 1.0)
     spec_note = "" if mat_rel == "none" else f"; materials={mat_rel}"
     if index is not None and pn_rel not in ("same", "core") and desc_score > 0:
         spec, m = index.specificity(a, b)

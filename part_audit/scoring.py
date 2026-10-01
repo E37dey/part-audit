@@ -7,6 +7,8 @@ Every candidate pair gets one category:
 * ``near_identical``     - geometry within a few percent: alert only, never merged.
 * ``conflict``           - same part number but different geometry.
 * ``name_similar``       - names match strongly, geometry different (or not comparable).
+* ``mirror``             - same size and properties but mirror images (left/right-hand parts):
+                           reported for information, never merged.
 
 Confidence values are heuristic evidence scores in [0, 1] (not calibrated
 probabilities); the measured precision per category is in the Metrics sheet.
@@ -30,12 +32,14 @@ UNIT_FACTORS = {
 class Thresholds:
     geo_exact: float = 1e-6        # every global property within this -> identical even if topology differs
     geo_identical: float = 1e-4    # within this and same topology -> identical
-    geo_near: float = 0.05         # within this -> near-identical candidate
+    geo_near: float = 0.10         # within this -> near-identical candidate (tuned on dev)
+    geo_split_type_tol: float = 2e-4  # per-type area shares equal within this -> faces only split differently
     near_max_face_ratio: float = 3.0     # topology guard for near-identical (no L3b)
     near_max_type_dist: float = 0.25     # surface-type area-fraction L1 distance guard
     unit_tol: float = 1e-4         # tolerance on the scale factor for unit mismatches
-    name_similar: float = 0.85     # L2 score for a name match
+    name_similar: float = 0.90     # L2 score for a name match (tuned on dev)
     name_k0: int = 3               # L2: descriptions shared by more distinct PNs than this are discounted
+    name_partial_factor: float = 0.85  # L2: one name gives a dimension/material, the other does not (tuned on dev)
     name_candidate: float = 0.70   # L2 score kept for context in reports
     shape_same_excess50: float = 2.0   # L3b: 'identical' by properties is downgraded above this median excess
     shape_near_excess50: float = 3.0   # L3b: near-identical needs median surface distance <= this x noise
@@ -125,13 +129,24 @@ def compare_geometry(fa: dict | None, fb: dict | None, th: Thresholds, scale: fl
     if scale != 1.0:
         gm.unit_note = UNIT_FACTORS.get(round(scale if scale > 1 else 1 / scale, 4), f"x{scale:g}")
     gm.chirality = chirality_relation(fa, fb, th)
-    if max_rel <= th.geo_exact or (max_rel <= th.geo_identical and topo_same):
+    # faces split differently (other CAD system) but the same surfaces: per-type areas and the set of
+    # underlying planes/cylinders/... unchanged. A micro fillet or hole adds a surface instead.
+    ua, ub = fa.get("unique_surfaces"), fb.get("unique_surfaces")
+    same_surfaces = ua is not None and ua == ub
+    split_only = not topo_same and same_surfaces and gm.type_dist <= th.geo_split_type_tol
+    if (max_rel <= th.geo_exact and (topo_same or same_surfaces or ua is None or ub is None)) or \
+            (max_rel <= th.geo_identical and (topo_same or split_only)):
         gm.relation = "unit_scaled" if scale != 1.0 else "identical"
         if not solid_ok:
             gm.note = "open shell: compared by area and bounding box only"
+        if not topo_same:
+            gm.note = (gm.note + "; " if gm.note else "") + "same surfaces split into different faces (re-export)"
     elif max_rel <= th.geo_near and scale == 1.0:
-        if gm.face_ratio <= th.near_max_face_ratio and gm.type_dist <= th.near_max_type_dist:
+        tess = max(fa.get("surf_area_frac", {}).get("other", 0), fb.get("surf_area_frac", {}).get("other", 0)) > 0.9
+        if tess or (gm.face_ratio <= th.near_max_face_ratio and gm.type_dist <= th.near_max_type_dist):
             gm.relation = "near"
+            if tess:
+                gm.note = "one file has tessellated (mesh) faces: compared without surface types"
     return gm
 
 
@@ -203,29 +218,74 @@ _MATERIAL_SYNONYMS = {
 }
 
 
+_MATERIAL_CODES = {"al": "aluminum", "ss": "stainless", "aisi": "stainless", "st": "steel"}
+_GRADED = ("aluminum", "stainless", "steel")
+
+
 def material_key(text: str) -> str:
-    toks = re.findall(r"[a-z]+|\d+|[א-ת]+", str(text).lower().replace("-", " "))
-    out = []
-    for t in toks:
-        if t.isdigit():
-            out.append(t)
-        elif t in _MATERIAL_SYNONYMS:
-            out.append(_MATERIAL_SYNONYMS[t])
-        elif re.fullmatch(r"(?:al|ss|aisi|en|st)", t):
-            continue
-        else:
-            out.append(t)
-    return " ".join(sorted(set(out)))
+    """Canonical material: family (+ grade for aluminium/stainless/steel). 'AL 6061', 'Aluminium 6061' and
+    'אלומיניום 6061' -> 'aluminum 6061'; 'PA6', 'Nylon PA6', 'ניילון' -> 'nylon'."""
+    t = str(text).lower()
+    t = re.sub(r"(?<![a-z])pa\s*-?\s*6{1,2}(?![0-9])", " nylon ", t)
+    family, digits, other = "", [], []
+    for tok in re.findall(r"[a-z]+|\d+|[\u05d0-\u05ea]+", t.replace("-", " ")):
+        if tok.isdigit():
+            digits.append(tok)
+        elif tok in _MATERIAL_SYNONYMS:
+            family = family or _MATERIAL_SYNONYMS[tok]
+        elif tok in _MATERIAL_CODES:
+            family = family or _MATERIAL_CODES[tok]
+        elif tok != "en":
+            other.append(tok)
+    if family:
+        return family + (" " + digits[0] if family in _GRADED and digits else "")
+    return " ".join(sorted(set(other + digits)))
+
+
+def item_material(it: Item) -> tuple[str, str]:
+    """(material key, label) from the linked ERP row, else from a material named in the file/STEP name."""
+    if it.erp and str(it.erp.get("material", "")).strip():
+        m = str(it.erp["material"]).strip()
+        return material_key(m), f"{m} (ERP)"
+    for src in it.sources:
+        if src.materials:
+            m = " ".join(src.materials)
+            return material_key(m), f"{m} (name)"
+    return "", ""
 
 
 def erp_attribute_conflicts(a: Item, b: Item) -> list[str]:
-    if not a.erp or not b.erp:
-        return []
-    issues = []
-    ma, mb = a.erp.get("material", ""), b.erp.get("material", "")
-    if ma and mb and material_key(ma) != material_key(mb):
-        issues.append(f"material differs ({ma} vs {mb})")
-    return issues
+    (ka, la), (kb, lb) = item_material(a), item_material(b)
+    if ka and kb and ka != kb:
+        return [f"material differs ({la} vs {lb})"]
+    return []
+
+
+def enforce_material_consistency(pairs: list["Pair"], items: dict[str, Item]) -> None:
+    """If identical geometry is used by parts with different known materials, nothing in that cluster is
+    merged unless both files are known to have the same material (a file without material information
+    cannot be assigned to either part)."""
+    uf = UnionFind()
+    for p in pairs:
+        if p.geo_relation in ("identical", "unit_scaled"):
+            uf.union(p.a, p.b)
+    mats: dict[str, dict[str, str]] = {}
+    for x in list(uf.parent):
+        k, label = item_material(items[x])
+        if k:
+            mats.setdefault(uf.find(x), {})[k] = label
+    for p in pairs:
+        if p.category != "identical":
+            continue
+        known = mats.get(uf.find(p.a), {})
+        if len(known) < 2:
+            continue
+        ka, kb = item_material(items[p.a])[0], item_material(items[p.b])[0]
+        if ka and ka == kb:
+            continue
+        p.category, p.merge_ok = "identical_attr_conflict", False
+        p.reason += ("; the same geometry is used by parts with different materials ("
+                     + ", ".join(sorted(known.values())) + ") - cannot tell which one applies; do not merge")
 
 
 # --------------------------------------------------------------------------- pairs
@@ -337,7 +397,7 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
     elif p.geo_relation == "near":
         p.category = "near_identical"
     elif p.geo_relation == "mirror":
-        p.category = "near_identical"
+        p.category = "mirror"
     elif p.same_pn and p.geo_relation == "unknown":
         p.category = "conflict_unverified"
         p.confidence = 0.5
@@ -398,7 +458,8 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
                 get(ids[i], ids[j]).same_pn = True
     # L2
     name_items = {fid: it.sources for fid, it in items.items() if it.sources}
-    index = NameIndex(name_items, {fid: it.pn_key for fid, it in items.items() if it.pn_key}, k0=th.name_k0)
+    index = NameIndex(name_items, {fid: it.pn_key for fid, it in items.items() if it.pn_key}, k0=th.name_k0,
+                      partial_factor=th.name_partial_factor)
     for a, b in blocking_pairs(name_items):
         m = best_match(items[a].sources, items[b].sources, index)
         if m and m.score >= th.name_candidate:
@@ -416,6 +477,7 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
         classify(p, ia, ib, th)
         if p.category:
             out.append(p)
+    enforce_material_consistency(out, items)
     return out
 
 

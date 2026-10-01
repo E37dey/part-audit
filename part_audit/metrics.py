@@ -13,7 +13,8 @@ Definitions (also written into the Metrics sheet):
   relation is near.
 * F (name layer alone): a pair is linked when its L2 name score >= name_similar.
   Recall = share of (base, F-variant) pairs linked; precision = among links that
-  involve an F file, share that are same-part pairs. F1 from those.
+  involve an F file, share whose files are in the same GT group (same part or its
+  E revision); links to a different group are false. F1 from those.
 * FP rate: flagged pairs = merge candidates (category identical) + near-identical
   alerts; FP = a merge candidate whose files belong to different GT groups, or a
   near-identical alert between geometrically unrelated files (an HN_material copy
@@ -146,15 +147,16 @@ def evaluate(res, gt_path: str | Path) -> dict:
                         "reason": (p.name.detail if p and p.name else "no name candidate"),
                         "variant": gt[f].get("variant", "")})
     links = [p for p in involving.get("F", []) if linked(p)]
-    good = sum(1 for p in links if gt_rel(p.a, p.b) == "identical")
+    same_group = lambda p: gt_rel(p.a, p.b) in ("identical", "near")  # noqa: E731
+    good = sum(1 for p in links if same_group(p))
     prec, rec = _ratio(good, len(links)), _ratio(tp, len(f_files))
     f1 = _f1(prec, rec)
     rows.append({"type": "F", "n_pairs": len(f_files), "tp": tp, "fn": len(f_files) - tp, "fp": len(links) - good,
                  "precision": prec, "recall": rec, "f1": f1, "target": TARGETS["F"][0],
                  "met": ("yes" if (f1 or 0) >= 0.85 else "no") if f_files else "n/a",
-                 "definition": "name layer only: (base, F) pairs with name score >= threshold; precision over links with an F file"})
+                 "definition": "name layer only: (base, F) pairs with name score >= threshold; precision over links with an F file (same GT group = correct)"})
     for p in links:
-        if gt_rel(p.a, p.b) != "identical":
+        if not same_group(p):
             details.append({"set": "false_positive", "type": "F", "file_a": p.a, "file_b": p.b,
                             "expected": gt_rel(p.a, p.b), "predicted_geo": pgeo(p), "category": p.category,
                             "correct": False, "reason": p.name.detail})
@@ -166,10 +168,10 @@ def evaluate(res, gt_path: str | Path) -> dict:
 
     # name layer over all links (any type)
     all_links = [p for p in res.pairs if linked(p)]
-    same = sum(1 for p in all_links if gt_rel(p.a, p.b) == "identical")
+    same = sum(1 for p in all_links if same_group(p))
     rows.append({"type": "Name links, all types", "n_pairs": None, "tp": same, "fn": None, "fp": len(all_links) - same,
                  "precision": _ratio(same, len(all_links)), "recall": None, "f1": None, "target": "info", "met": "n/a",
-                 "definition": "all pairs with name score >= threshold; precision = share that are the same part"})
+                 "definition": "all pairs with name score >= threshold; precision = share within the same GT group"})
 
     # FP rate on truly different parts
     flagged = [p for p in res.pairs if (p.category == "identical" and p.merge_ok) or p.category == "near_identical"]
@@ -197,7 +199,7 @@ def evaluate(res, gt_path: str | Path) -> dict:
         if kind == "HN_material":
             ok = cat in ("identical_attr_conflict",)
         elif kind == "HN_mirror":
-            ok = p is not None and p.geo_relation == "mirror"
+            ok = p is not None and p.category == "mirror"
         else:
             ok = cat not in ("identical", "near_identical") and pgeo(p) not in ("identical", "near")
         hn_out[kind]["total"] += 1

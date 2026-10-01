@@ -114,3 +114,31 @@ def test_cache_roundtrip(tmp_path, parts):
     assert math.isclose(a[0]["p"]["volume"], b[0]["p"]["volume"])
     pts = b[3].get_samples("sha-p")
     assert pts.shape == (4096, 3) and abs(pts).max() <= 1.0  # stored relative to the bbox diagonal
+
+
+def test_stray_open_sheet_is_ignored():
+    """AP242 exporters sometimes put small open sheets (annotation planes) inside a solid."""
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pln, gp_Pnt, gp_Dir
+    from OCP.TopoDS import TopoDS_Shell, TopoDS_Solid
+    from OCP.TopAbs import TopAbs_SHELL
+    from part_audit.geometry import _map, shape_fingerprint
+    from OCP.TopoDS import TopoDS
+
+    box = BRepPrimAPI_MakeBox(40, 30, 20).Shape()
+    clean = shape_fingerprint(box)
+    sheet = BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(200, 0, 0), gp_Dir(0, 0, 1)), 0, 3, 0, 3).Face()
+    b = BRep_Builder()
+    shell = TopoDS_Shell()
+    b.MakeShell(shell)
+    b.Add(shell, sheet)
+    solid = TopoDS_Solid()
+    b.MakeSolid(solid)
+    b.Add(solid, TopoDS.Shell_s(_map(box, TopAbs_SHELL).FindKey(1)))
+    b.Add(solid, shell)
+    fp = shape_fingerprint(solid)
+    assert fp["stray_sheets_ignored"] == 1 and fp["closed"]
+    assert fp["area"] == pytest.approx(clean["area"]) and fp["volume"] == pytest.approx(clean["volume"])
+    assert fp["bbox_pca"] == pytest.approx(clean["bbox_pca"], rel=1e-6)

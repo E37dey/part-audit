@@ -109,7 +109,8 @@ def erp_duplicate_candidates(erp_rows: list[dict], th: Thresholds) -> list[dict]
     parsed = {str(r["erp_row"]): [parse_name(str(r.get("description", "")), known_pns=[r["part_number"]])]
               for r in erp_rows}
     by_row = {str(r["erp_row"]): r for r in erp_rows}
-    index = NameIndex(parsed, {str(r["erp_row"]): pn_key(r["part_number"]) for r in erp_rows}, k0=th.name_k0)
+    index = NameIndex(parsed, {str(r["erp_row"]): pn_key(r["part_number"]) for r in erp_rows}, k0=th.name_k0,
+                      partial_factor=th.name_partial_factor)
     out = []
     for a, b in sorted(blocking_pairs(parsed)):
         m = best_match(parsed[a], parsed[b], index)
