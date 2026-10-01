@@ -28,16 +28,18 @@ All numbers below were produced by the scripts in `tools/` on the data described
 
 Thresholds were tuned on the dev set and frozen; the test set was built afterwards and scored once with the frozen code and thresholds:
 
-| Type | GT pairs | TP | FN | FP | Precision | Recall | F1 | Target | Met |
-|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| A | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| B | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| C | 30 | 29 | 1 | 0 | 100.0% | 96.7% | 0.983 | P>=95% and R>=95% | yes |
-| D | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| E | 40 | 40 | 0 | 1 | 98.1% | 100.0% | 0.990 | R>=80% at P>=90% | yes |
-| F | 50 | 35 | 15 | 6 | 88.2% | 70.0% | 0.781 | F1>=0.85 | no |
-| F (full pipeline) | 50 | 50 | 0 | - | - | 100.0% | - | info | n/a |
-| False positives / flagged pairs | 234 | 232 | - | 2 | - | - | - | FP <= 2% | yes |
+| Type | GT pairs | Found | Missed | Predicted | Wrong | Precision | Recall | F1 | Target | Met |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| A | 30 | 30 | 0 | 42 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| B | 30 | 30 | 0 | 40 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| C | 30 | 29 | 1 | 40 | 0 | 100.0% | 96.7% | 0.983 | P>=95% and R>=95% | yes |
+| D | 30 | 30 | 0 | 36 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| E | 40 | 40 | 0 | 52 | 1 | 98.1% | 100.0% | 0.990 | R>=80% at P>=90% | yes |
+| F | 50 | 35 | 15 | 51 | 6 | 88.2% | 70.0% | 0.781 | F1>=0.85 | no |
+| F (full pipeline) | 50 | 50 | 0 | - | - | - | 100.0% | - | info | n/a |
+| False positives / flagged pairs | - | - | - | 234 | 2 | - | - | - | FP <= 2% | yes |
+
+*GT pairs / Found / Missed*: (base, variant) pairs, used for recall. *Predicted / Wrong*: every predicted pair that involves a file of that type, used for precision = (Predicted - Wrong) / Predicted. For F, 'predicted' means a name-layer link (score >= threshold). For the false-positive row, 'Predicted' is all flagged pairs (merge candidates + near-identical alerts).
 
 False positives on truly different parts: 2 of 234 flagged pairs = **0.85%** (target <= 2%).
 
@@ -52,7 +54,7 @@ All name-layer links (any type): 277 links, 75.8% within the same ground-truth g
 
 Remaining errors in this run:
 
-- Name layer (F): 15 of the F variants were not linked by name alone; 10 of them because the description is shared by many part numbers (generic, discounted on purpose) and 5 because a transliteration or typo was not recognised. 6 name links pointed to a different part with the same or nearly the same description. With geometry (full pipeline) every F variant was linked.
+- Name layer (F): 15 of the F variants were not linked by name alone; 7 of them because the description matched but is shared by many part numbers (generic, discounted on purpose) and 8 because the variant's description itself scored below the threshold (unrecognised transliteration or typo, or a generic name that also scored low). 6 name links pointed to a different part with the same or nearly the same description. With geometry (full pipeline) every F variant was linked.
 - positive (C): `PA-17473_STIFFENER-FLAT.stp` vs `PA-17473_STIFFENER-FLAT_old.step` - expected identical, got conflict (geometry: mirror).
 - false positive (E): `PA-14079 KNOB FRONT CYLINDER D16 MODIFIED.stp` vs `PA-14080_KNOB-FRONT-CYLINDER-D16-LH.step` - expected different, got near_identical.
 - false positive (flagged): `PA-14079 KNOB FRONT CYLINDER D16 MODIFIED.stp` vs `PA-14080_KNOB-FRONT-CYLINDER-D16-LH.step` - expected different, got near_identical.
@@ -82,16 +84,18 @@ Error analysis on the test run found one algorithmic bug (not a threshold): for 
 
 ## Dev set (used for tuning)
 
-| Type | GT pairs | TP | FN | FP | Precision | Recall | F1 | Target | Met |
-|---|---:|---:|---:|---:|---:|---:|---:|---|---|
-| A | 15 | 15 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| B | 15 | 14 | 1 | 0 | 100.0% | 93.3% | 0.966 | P>=95% and R>=95% | no |
-| C | 15 | 15 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| D | 15 | 15 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
-| E | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | R>=80% at P>=90% | yes |
-| F | 50 | 39 | 11 | 0 | 100.0% | 78.0% | 0.876 | F1>=0.85 | yes |
-| F (full pipeline) | 50 | 50 | 0 | - | - | 100.0% | - | info | n/a |
-| False positives / flagged pairs | 166 | 166 | - | 0 | - | - | - | FP <= 2% | yes |
+| Type | GT pairs | Found | Missed | Predicted | Wrong | Precision | Recall | F1 | Target | Met |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| A | 15 | 15 | 0 | 22 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| B | 15 | 14 | 1 | 18 | 0 | 100.0% | 93.3% | 0.966 | P>=95% and R>=95% | no |
+| C | 15 | 15 | 0 | 20 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| D | 15 | 15 | 0 | 19 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| E | 30 | 30 | 0 | 47 | 0 | 100.0% | 100.0% | 1.000 | R>=80% at P>=90% | yes |
+| F | 50 | 39 | 11 | 55 | 0 | 100.0% | 78.0% | 0.876 | F1>=0.85 | yes |
+| F (full pipeline) | 50 | 50 | 0 | - | - | - | 100.0% | - | info | n/a |
+| False positives / flagged pairs | - | - | - | 166 | 0 | - | - | - | FP <= 2% | yes |
+
+*GT pairs / Found / Missed*: (base, variant) pairs, used for recall. *Predicted / Wrong*: every predicted pair that involves a file of that type, used for precision = (Predicted - Wrong) / Predicted. For F, 'predicted' means a name-layer link (score >= threshold). For the false-positive row, 'Predicted' is all flagged pairs (merge candidates + near-identical alerts).
 
 False positives on truly different parts: 0 of 166 flagged pairs = **0.00%** (target <= 2%).
 
@@ -106,7 +110,7 @@ All name-layer links (any type): 162 links, 88.9% within the same ground-truth g
 
 Remaining errors on dev:
 
-- Name layer (F): 11 of the F variants were not linked by name alone; 9 of them because the description is shared by many part numbers (generic, discounted on purpose) and 2 because a transliteration or typo was not recognised. 0 name links pointed to a different part with the same or nearly the same description. With geometry (full pipeline) every F variant was linked.
+- Name layer (F): 11 of the F variants were not linked by name alone; 9 of them because the description matched but is shared by many part numbers (generic, discounted on purpose) and 2 because the variant's description itself scored below the threshold (unrecognised transliteration or typo, or a generic name that also scored low). 0 name links pointed to a different part with the same or nearly the same description. With geometry (full pipeline) every F variant was linked.
 - positive (B): `PA-18634 stop.stp` vs `PA-10011_STOP_AP242.step` - expected identical, got identical_attr_conflict.
 
 ## Real STEP files: NIST MBE PMI models
@@ -118,6 +122,8 @@ Remaining errors on dev:
 | same test case | 51 | (not flagged): 2, identical: 26, near_identical: 23 |
 | stc-vs-ftc | 16 | identical: 11, near_identical: 5 |
 | different test cases | 0 | - |
+
+Of the 51 same-test-case pairs, 11 are the same file name in the two NIST archives (results: identical: 11). The other 40 pairs are different exports of the same test case (AP203 geometry-only, AP203 with PMI, AP242; NIST removed the names of the CAD systems): (not flagged): 2, identical: 15, near_identical: 23. No pair of different test cases was flagged.
 
 Pairs of the same test case (tool category, largest property difference):
 
@@ -184,6 +190,8 @@ Benchmark: 5000 random ABC STEP files (1536.7 MB, median 89.5 KB, max 2889.8 KB)
 Before the last speed-up (same 5,000 files, same machine) the run took 30.0 min (scoring stage 760.9 s, of which L3b shape checks 718.5 s). L3b now runs only where it can change the result and in parallel processes; dev and test metrics were identical before and after.
 
 ## Threshold sweeps on the dev set
+
+Provenance: `geo_near` = 0.10 was chosen on an earlier build of the dev set (same 250 ABC base parts, 18 E variants, code before the stray-sheet and unique-surface changes). In that sweep, `geo_near` 0.05 and 0.08 found 17 of 18 E variants (the miss was a fillet that changed the surface area by 9%) and 0.10 and 0.15 found 18 of 18, all with 0 false positives. That console output was not saved to a file before the dev set was rebuilt with more E and F variants. The geometry sweep below was re-run on the final dev set after the test run, for the record only: on this set every setting gives the same metrics, so it does not discriminate. The name thresholds were chosen from the name sweep below (final dev set, before the test set was built).
 
 Geometry:
 

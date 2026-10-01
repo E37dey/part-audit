@@ -41,6 +41,21 @@ class StepReadError(RuntimeError):
     pass
 
 
+# temporary ASCII-path copies (Windows); left-overs from killed workers are removed after each run
+TMP_DIR = Path(tempfile.gettempdir()) / "part_audit_tmp"
+
+
+def _clean_tmp(since: float) -> None:
+    if not TMP_DIR.exists():
+        return
+    for f in TMP_DIR.glob("*.step"):
+        try:
+            if f.stat().st_mtime >= since - 1:
+                f.unlink()
+        except OSError:
+            pass
+
+
 def silence_occ() -> None:
     """OpenCascade prints progress to stdout; keep only failures."""
     try:
@@ -58,7 +73,8 @@ def read_step_shape(path: str):
 
     tmp = None
     if sys.platform == "win32" and not path.isascii():  # OCC + non-ASCII paths on Windows
-        fd, tmp = tempfile.mkstemp(suffix=".step")
+        TMP_DIR.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(suffix=".step", dir=TMP_DIR)
         os.close(fd)
         shutil.copyfile(path, tmp)
         path = tmp
@@ -590,6 +606,7 @@ def fingerprint_files(files: list[tuple[str, str, str]], workers: int = 1, timeo
                     on_result(sha, "err", f"{type(exc).__name__}: {exc}", time.perf_counter() - t)
         else:
             TimeoutPool("part_audit.geometry:fingerprint_path", workers, timeout_s).run(todo, on_result)
+        _clean_tmp(t0)
     cache.commit()
     stats = {"files": len(files), "unique": len(by_sha), "cached": len(cached), "computed": len(todo),
              "wall_s": time.perf_counter() - t0}

@@ -4,6 +4,10 @@ Definitions (also written into the Metrics sheet):
 
 * Ground-truth relation of two files: same group_id -> 'identical', or 'near' if
   one of them is an E (tiny change) variant; different group_id -> 'different'.
+Recall counts (base, variant) pairs only; precision counts every predicted pair that involves a file of
+that type (e.g. an A copy matched to another copy of the same part is a correct prediction too), so the
+'predicted' and 'wrong' columns are the precision population, not TP + FP.
+
 * A-D: positives are (base, variant) pairs. Recall = share proposed as merge
   candidates (category 'identical': L1 hash or geometric match incl. unit-scaled,
   and no ERP attribute conflict). Precision = among all merge candidates that
@@ -123,7 +127,8 @@ def evaluate(res, gt_path: str | Path) -> dict:
         good = sum(1 for (a, b) in flagged if gt_rel(a, b, geo) == want)
         prec, rec = _ratio(good, len(flagged)), _ratio(tp, len(pos))
         target, check = TARGETS[t]
-        rows.append({"type": t, "n_pairs": len(pos), "tp": tp, "fn": len(pos) - tp, "fp": len(flagged) - good,
+        rows.append({"type": t, "n_pairs": len(pos), "tp": tp, "fn": len(pos) - tp, "n_pred": len(flagged),
+                     "fp": len(flagged) - good,
                      "precision": prec, "recall": rec, "f1": _f1(prec, rec), "target": target,
                      "met": ("yes" if check(prec or 0, rec or 0, _f1(prec, rec) or 0) else "no") if pos else "n/a",
                      "definition": (f"(base, {t}) pairs proposed as merge candidates; precision over merge candidates with a {t} file"
@@ -151,7 +156,8 @@ def evaluate(res, gt_path: str | Path) -> dict:
     good = sum(1 for p in links if same_group(p))
     prec, rec = _ratio(good, len(links)), _ratio(tp, len(f_files))
     f1 = _f1(prec, rec)
-    rows.append({"type": "F", "n_pairs": len(f_files), "tp": tp, "fn": len(f_files) - tp, "fp": len(links) - good,
+    rows.append({"type": "F", "n_pairs": len(f_files), "tp": tp, "fn": len(f_files) - tp, "n_pred": len(links),
+                 "fp": len(links) - good,
                  "precision": prec, "recall": rec, "f1": f1, "target": TARGETS["F"][0],
                  "met": ("yes" if (f1 or 0) >= 0.85 else "no") if f_files else "n/a",
                  "definition": "name layer only: (base, F) pairs with name score >= threshold; precision over links with an F file (same GT group = correct)"})

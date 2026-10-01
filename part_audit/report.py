@@ -426,16 +426,17 @@ def _metrics_sheet(ws, metrics: dict) -> None:
     ws["A1"].font = TITLE_FONT
     r = 3
     table = metrics.get("per_type", [])
-    cols = [("type", "Type", 30), ("n_pairs", "GT pairs", 9), ("tp", "TP", 6), ("fn", "FN", 6), ("fp", "FP", 6),
-            ("precision", "Precision", 10), ("recall", "Recall", 10), ("f1", "F1", 8), ("target", "Target", 30),
-            ("met", "Met?", 7), ("definition", "How it is counted", 70)]
+    cols = [("type", "Type", 30), ("n_pairs", "GT pairs (recall)", 10), ("tp", "Found", 7), ("fn", "Missed", 7),
+            ("n_pred", "Predicted (precision)", 11), ("fp", "Wrong", 7), ("precision", "Precision", 10),
+            ("recall", "Recall", 10), ("f1", "F1", 8), ("target", "Target", 30), ("met", "Met?", 7),
+            ("definition", "How it is counted", 70)]
     r = _write_table(ws, table, cols, start_row=r, wrap_cols=("definition",))
     for i in range(4, r + 1):
-        for c in (6, 7, 8):
+        for c in (7, 8):
             ws.cell(row=i, column=c).number_format = "0.0%"
-        met = ws.cell(row=i, column=10).value
+        met = ws.cell(row=i, column=11).value
         if met in ("yes", "no"):
-            ws.cell(row=i, column=10).fill = GREEN_FILL if met == "yes" else RED_FILL
+            ws.cell(row=i, column=11).fill = GREEN_FILL if met == "yes" else RED_FILL
     r += 2
     for k, v in metrics.get("summary", {}).items():
         ws.cell(row=r, column=1, value=k).font = BOLD

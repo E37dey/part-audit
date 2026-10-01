@@ -23,16 +23,25 @@ def pct(x, digits: int = 1) -> str:
 
 
 def metrics_table(m: dict) -> str:
-    rows = ["| Type | GT pairs | TP | FN | FP | Precision | Recall | F1 | Target | Met |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---|---|"]
+    rows = ["| Type | GT pairs | Found | Missed | Predicted | Wrong | Precision | Recall | F1 | Target | Met |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"]
     for r in m["per_type"]:
         if r["type"].startswith(("Hard negatives", "Name links")):
             continue
         def v(k):
             return "-" if r[k] is None else r[k]
         f1 = "-" if r["f1"] is None else f"{r['f1']:.3f}"
-        rows.append(f"| {r['type']} | {v('n_pairs')} | {v('tp')} | {v('fn')} | {v('fp')} | "
+        n_pred = r.get("n_pred")
+        if n_pred is None and r["type"].startswith("False positives"):
+            n_pred = r["n_pairs"]
+        rows.append(f"| {r['type']} | {'-' if r['type'].startswith('False') else v('n_pairs')} | "
+                    f"{'-' if r['type'].startswith('False') else v('tp')} | {v('fn')} | "
+                    f"{'-' if n_pred is None else n_pred} | {v('fp')} | "
                     f"{pct(r['precision'])} | {pct(r['recall'])} | {f1} | {r['target']} | {r['met']} |")
+    rows += ["", "*GT pairs / Found / Missed*: (base, variant) pairs, used for recall. *Predicted / Wrong*: every "
+             "predicted pair that involves a file of that type, used for precision = (Predicted - Wrong) / Predicted. "
+             "For F, 'predicted' means a name-layer link (score >= threshold). For the false-positive row, "
+             "'Predicted' is all flagged pairs (merge candidates + near-identical alerts)."]
     return "\n".join(rows)
 
 
@@ -44,7 +53,7 @@ def fp_line(m: dict) -> str:
             f"{s['flagged pairs']} flagged pairs = **{pct(s['FP rate'], 2)}** (target <= 2%).")
 
 
-def error_notes(d: Path, name: str) -> list[str]:
+def error_notes(d: Path, name: str, name_threshold: float = 0.9) -> list[str]:
     """Counts of the remaining errors by cause, computed from the evaluation details CSV."""
     import csv
     p = d / name
@@ -52,12 +61,18 @@ def error_notes(d: Path, name: str) -> list[str]:
         return []
     rows = list(csv.DictReader(open(p, encoding="utf-8-sig")))
     f_miss = [r for r in rows if r["type"] == "F" and r["set"] == "positive" and r["correct"] == "False"]
-    generic = sum(1 for r in f_miss if "generic description" in r["reason"])
+
+    def desc_sim(r):
+        m = re.search(r"desc_sim=([0-9.]+)", r["reason"])
+        return float(m.group(1)) if m else 0.0
+    # 'generic' only when the description itself matched (>= the name threshold) and the discount pushed it below
+    generic = sum(1 for r in f_miss if "generic description" in r["reason"] and desc_sim(r) >= name_threshold)
     f_fp = [r for r in rows if r["type"] == "F" and r["set"] == "false_positive"]
     other = [r for r in rows if r["correct"] == "False" and r["type"] != "F"]
     out = [f"- Name layer (F): {len(f_miss)} of the F variants were not linked by name alone; {generic} of them "
-           "because the description is shared by many part numbers (generic, discounted on purpose) and "
-           f"{len(f_miss) - generic} because a transliteration or typo was not recognised. "
+           "because the description matched but is shared by many part numbers (generic, discounted on purpose) "
+           f"and {len(f_miss) - generic} because the variant's description itself scored below the threshold "
+           "(unrecognised transliteration or typo, or a generic name that also scored low). "
            f"{len(f_fp)} name links pointed to a different part with the same or nearly the same description. "
            "With geometry (full pipeline) every F variant was linked."]
     for r in other:
@@ -115,6 +130,18 @@ def nist_section(n: dict) -> str:
         d = s.get(rel, {})
         cats = ", ".join(f"{k}: {v}" for k, v in sorted(d.get("by_category", {}).items())) or "-"
         out.append(f"| {rel} | {d.get('pairs', 0)} | {cats} |")
+    same = [r for r in n["pairs"] if r["relation"] == "same test case"]
+    copies = [r for r in same if r["file_a"].split("/")[-1] == r["file_b"].split("/")[-1]]
+    other = [r for r in same if r not in copies]
+    cnt = {}
+    for r in other:
+        cnt[r["category"]] = cnt.get(r["category"], 0) + 1
+    out += ["", f"Of the {len(same)} same-test-case pairs, {len(copies)} are the same file name in the two NIST "
+            f"archives (results: " + ", ".join(f"{k}: {v}" for k, v in sorted(
+                {c: sum(1 for r in copies if r['category'] == c) for c in {r['category'] for r in copies}}.items()))
+            + f"). The other {len(other)} pairs are different exports of the same test case (AP203 geometry-only, "
+            "AP203 with PMI, AP242; NIST removed the names of the CAD systems): "
+            + ", ".join(f"{k}: {v}" for k, v in sorted(cnt.items())) + ". No pair of different test cases was flagged."]
     out += ["", "Pairs of the same test case (tool category, largest property difference):", "",
             "| File A (archive) | File B (archive) | Category | Max relative property difference |", "|---|---|---|---:|"]
     def short(f):
@@ -225,7 +252,16 @@ def main() -> None:
                       f"{b['stage_s'].get('shape_s')} s). L3b now runs only where it can change the result and in "
                       "parallel processes; dev and test metrics were identical before and after.", ""]
     if tune_geo or tune_names:
-        parts += ["## Threshold sweeps on the dev set", ""]
+        parts += ["## Threshold sweeps on the dev set", "",
+                  "Provenance: `geo_near` = 0.10 was chosen on an earlier build of the dev set (same 250 ABC base "
+                  "parts, 18 E variants, code before the stray-sheet and unique-surface changes). In that sweep, "
+                  "`geo_near` 0.05 and 0.08 found 17 of 18 E variants (the miss was a fillet that changed the "
+                  "surface area by 9%) and 0.10 and 0.15 found 18 of 18, all with 0 false positives. That console "
+                  "output was not saved to a file before the dev set was rebuilt with more E and F variants. The "
+                  "geometry sweep below was re-run on the final dev set after the test run, for the record only: "
+                  "on this set every setting gives the same metrics, so it does not discriminate. The name "
+                  "thresholds were chosen from the name sweep below (final dev set, before the test set was built).",
+                  ""]
         for title, rows, keys in (("Geometry", tune_geo, ("geo_near", "shape_near_excess50")),
                                   ("Names", tune_names, ("name_similar", "name_k0", "name_partial_factor"))):
             if not rows:
@@ -246,9 +282,15 @@ def main() -> None:
     if readme.exists() and primary:
         block = ["<!-- results:start -->", metrics_table(primary), "", fp_line(primary), ""]
         if frozen and test:
+            fz = {r["type"]: r for r in frozen["per_type"]}
+            fx = {r["type"]: r for r in test["per_type"]}
+            fpk = "False positives / flagged pairs"
             block += ["One algorithmic bug found during error analysis on this run (a rotated copy of a nearly "
-                      "axisymmetric part reported as a mirror image) was fixed afterwards without changing thresholds; "
-                      "with the fix, C recall is 100% and nothing else changed (see RESULTS.md).", ""]
+                      "axisymmetric part reported as a mirror image) was fixed afterwards without changing thresholds. "
+                      f"With the fix, C recall is {pct(fx['C']['recall'])} (was {pct(fz['C']['recall'])}) and the "
+                      f"flagged pairs went from {fz[fpk]['n_pairs']} to {fx[fpk]['n_pairs']} with "
+                      f"{fx[fpk]['fp']} false positives (was {fz[fpk]['fp']}); all other rows are unchanged "
+                      "(see RESULTS.md).", ""]
         block += [speed_section(None, bench), "<!-- results:end -->"]
         txt = readme.read_text(encoding="utf-8")
         txt = re.sub(r"<!-- results:start -->.*?<!-- results:end -->", "\n".join(block), txt, flags=re.S)
