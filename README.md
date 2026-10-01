@@ -124,7 +124,9 @@ Benchmark: 5000 random ABC STEP files (1536.7 MB, median 89.5 KB, max 2889.8 KB)
 # 1. data (public): ABC STEP chunks 0000-0002 (MIT; model rights belong to their creators; internal use)
 #    list: https://deep-geometry.github.io/abc-dataset/data/step_v00.txt  (each chunk ~0.8-1.6 GB, 7z)
 #    NIST: https://www.nist.gov/document/nist-pmi-step-files  and  .../nist-ftc-ctc-pmi-cad-models
-7zz x abc_0000_step_v00.7z -oRAW/abc0      # (extract files up to 3 MB to save disk)
+python tools/extract_abc.py abc_0000_step_v00.7z RAW/abc0 --max-mb 3   # 5 KB-3 MB files only (needs 7-Zip)
+python tools/extract_abc.py abc_0001_step_v00.7z RAW/abc1 --max-mb 3
+python tools/extract_abc.py abc_0002_step_v00.7z RAW/abc2 --max-mb 3
 # 2. labeled sets (deterministic for a given seed)
 python tools/build_dataset.py --abc RAW/abc0 --n-base 250 --seed 11 --out data/dev \
        --rates A=0.06,B=0.06,C=0.06,D=0.06,E=0.12,F=0.20
@@ -181,8 +183,8 @@ merged. Each set's `manifest.json` records every random choice.
 part_audit/   scan.py stepfile.py hashes.py names.py geometry.py shape.py scoring.py audit.py report.py
               metrics.py llm.py cli.py
 tests/        tests for every layer (pytest)
-tools/        build_dataset.py dataset_tasks.py cadops.py tune.py nist_check.py feasibility.py bench.py
-              make_results.py
+tools/        extract_abc.py build_dataset.py dataset_tasks.py cadops.py tune.py nist_check.py
+              feasibility.py bench.py make_results.py
 data/sample/  small demo set (cad/, erp_export.csv, ground_truth.csv)
 results/      measured JSON outputs used by RESULTS.md
 ```
