@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# generated data and outputs (rebuild with tools/, see README)
+data/*
+!data/README.md
+!data/sample/
+out/*
+!out/.gitkeep
+.part_audit_cache/
+*.egg-info/

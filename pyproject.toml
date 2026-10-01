@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "part-audit"
+version = "0.1.0"
+description = "Local-only CAD/ERP part data audit demo: duplicate parts, near-duplicates and part-number inconsistencies"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cadquery-ocp>=7.7",   # OpenCascade bindings (STEP reading, geometry properties)
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    "rapidfuzz>=3.0",
+]
+
+[project.optional-dependencies]
+# Only needed to regenerate the synthetic test sets (tools/), not to run an audit.
+data = ["cadquery>=2.4", "trimesh>=4.0"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+part-audit = "part_audit.cli:main"
+
+[tool.setuptools]
+packages = ["part_audit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

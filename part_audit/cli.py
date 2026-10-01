@@ -1,0 +1,79 @@
+"""Command line interface.
+
+    python -m part_audit scan DATA_DIR [--erp erp.csv] [--out out/report.xlsx]
+    python -m part_audit fingerprint FILE.step        # debug one file
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def _default_workers() -> int:
+    return max(1, (os.cpu_count() or 2))
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="part_audit", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sc = sub.add_parser("scan", help="audit a folder of STEP files (+ optional ERP CSV) and write an Excel report")
+    sc.add_argument("folder")
+    sc.add_argument("--erp", help="ERP export CSV (part number, description, unit, material, supplier)")
+    sc.add_argument("--out", default="out/part_audit_report.xlsx", help="Excel report path")
+    sc.add_argument("--json", help="also write pairs/groups/mapping as JSON")
+    sc.add_argument("--workers", type=int, default=_default_workers())
+    sc.add_argument("--timeout", type=float, default=60.0, help="per-file geometry timeout in seconds")
+    sc.add_argument("--cache", help="fingerprint cache folder (default: <out folder>/.part_audit_cache)")
+    sc.add_argument("--no-geometry", action="store_true", help="hashes and names only (L1+L2), no OpenCascade")
+    sc.add_argument("--no-shape-check", action="store_true", help="disable the L3b aligned-surface check")
+    sc.add_argument("--ground-truth", help="ground_truth.csv to compute demo metrics (adds a Metrics sheet)")
+    sc.add_argument("--thresholds", help="JSON file overriding scoring thresholds")
+    sc.add_argument("--llm-endpoint", help="OPTIONAL local OpenAI-compatible endpoint (e.g. http://localhost:11434/v1). "
+                                         "Off by default; only candidate names are sent, never files.")
+    sc.add_argument("--llm-model", default="")
+    sc.add_argument("--llm-allow-remote", action="store_true", help="allow a non-localhost LLM endpoint")
+    sc.add_argument("-q", "--quiet", action="store_true")
+
+    fp = sub.add_parser("fingerprint", help="print the geometry fingerprint of one STEP file")
+    fp.add_argument("file")
+
+    args = ap.parse_args(argv)
+    if args.cmd == "fingerprint":
+        from .geometry import fingerprint_path
+        print(json.dumps(fingerprint_path(args.file), indent=1, default=str))
+        return 0
+
+    from .audit import AuditConfig, run_audit, save_json
+    from .report import write_report
+    from .scoring import Thresholds
+
+    th = Thresholds()
+    if args.thresholds:
+        for k, v in json.loads(Path(args.thresholds).read_text()).items():
+            if not hasattr(th, k):
+                ap.error(f"unknown threshold {k}")
+            setattr(th, k, v)
+    cache = args.cache or str(Path(args.out).resolve().parent / ".part_audit_cache")
+    cfg = AuditConfig(root=args.folder, erp_csv=args.erp, out_xlsx=args.out, workers=args.workers,
+                      use_geometry=not args.no_geometry, shape_check=not args.no_shape_check,
+                      timeout_s=args.timeout, cache_dir=cache, ground_truth=args.ground_truth,
+                      llm_endpoint=args.llm_endpoint, llm_model=args.llm_model,
+                      llm_allow_remote=args.llm_allow_remote, thresholds=th, verbose=not args.quiet)
+    res = run_audit(cfg)
+    path = write_report(res, args.out)
+    if args.json:
+        save_json(res, args.json)
+    print(f"report: {path}")
+    if res.metrics:
+        for row in res.metrics.get("per_type", []):
+            print(f"  {row['type']:<38} P={row['precision']} R={row['recall']} F1={row['f1']} target={row['target']} met={row['met']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
