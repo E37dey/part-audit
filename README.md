@@ -97,7 +97,23 @@ Thresholds were tuned on a separate dev set (ABC chunk 0000) and frozen before t
 files and timing are in [RESULTS.md](RESULTS.md).
 
 <!-- results:start -->
-(filled in by tools/make_results.py)
+| Type | GT pairs | TP | FN | FP | Precision | Recall | F1 | Target | Met |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| A | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| B | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| C | 30 | 29 | 1 | 0 | 100.0% | 96.7% | 0.983 | P>=95% and R>=95% | yes |
+| D | 30 | 30 | 0 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| E | 40 | 40 | 0 | 1 | 98.1% | 100.0% | 0.990 | R>=80% at P>=90% | yes |
+| F | 50 | 35 | 15 | 6 | 88.2% | 70.0% | 0.781 | F1>=0.85 | no |
+| F (full pipeline) | 50 | 50 | 0 | - | - | 100.0% | - | info | n/a |
+| False positives / flagged pairs | 234 | 232 | - | 2 | - | - | - | FP <= 2% | yes |
+
+False positives on truly different parts: 2 of 234 flagged pairs = **0.85%** (target <= 2%).
+
+One algorithmic bug found during error analysis on this run (a rotated copy of a nearly axisymmetric part reported as a mirror image) was fixed afterwards without changing thresholds; with the fix, C recall is 100% and nothing else changed (see RESULTS.md).
+
+
+Benchmark: 5000 random ABC STEP files (1536.7 MB, median 89.5 KB, max 2889.8 KB), 2 workers on a 2-vCPU cloud VM, cold cache: **20.29 min total** (0.243 s per file wall-clock). Geometry per file in a worker: mean 0.362 s, median 0.083 s, p90 1.028 s, max 25.04 s. Stages: scan + hashes 110.4 s, geometry (L3) 905.8 s, scoring incl. L3b 195.9 s, of which L3b 173.3 s (2677 L3b checks). Errors/skips: no usable geometry: 2. Peak RSS of the largest process: 591.7 MB.
 <!-- results:end -->
 
 ## Reproducing the data and numbers

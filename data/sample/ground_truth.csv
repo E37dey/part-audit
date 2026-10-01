@@ -1,0 +1,58 @@
+file_id,group_id,type,base_file_id,pn,variant,abc_source
+Archive/2019/גלגל-פנימי-אחורי-300-06572.STEP,G0024,F,PRJ-2201_Conveyor/assy/300-6572_WHEEL-INNER-REAR.STP,300-6572,byte copy; name variant: translit+hebrew,00006375_7665b1b3c6f346c2add9061b_step_000.step
+Archive/old versions/200-3546 BLOCK MOD.stp,G0012,E,PRJ-2307_Packaging_Line/parts/200-3545_BLOCK - Copy.step,200-3546,hole: hole d=4.85 mm (5.8% of size),00000816_36e6258346004cabb4c091b2_step_004.step
+Library/standard/100-1420 holder cylinder 60x25.stp,G0000,base,,100-1420,ABC part,00008329_d680b93a2dfa45658ae376f0_step_003.step
+Library/standard/100-1858_BEAM-POM.STEP,H0022,HN_material,PRJ-2410_Robot_Cell/mech/PA-18693_קורה.STP,100-1858,byte copy; ERP material POM vs AL 6061,00005534_6a94fbfec8d64c2ba6017575_step_009.step
+Library/standard/MP-02142 bracket valve t6.step,G0011,base,,MP-02142,ABC part,00004669_80f41391338f4a16b385c438_step_000.step
+Library/standard/MP-02907 handle sensor.STEP,G0016,base,,MP-02907,ABC part,00009893_086229ea796640d29acd68ff_step_028.step
+Library/standard/PA-10987 panel cylinder 20x30.STEP,G0027,base,,PA-10987,ABC part,00006546_96dfd8eaa8704d3990e00400_step_002.step
+Library/standard/PA-13653 SHAFT SIDE UPPER.STEP,G0028,E,PRJ-2201_Conveyor/assy/PA-13652_SHAFT-SIDE-UPPER_ישן.stp,PA-13653,hole: hole d=3.23 mm (5.5% of size),00004408_2f3c47ebc0054b4f8e0e4cf4_step_006.step
+Library/standard/PA-13909_RAIL-SHORT-ST37.STEP,H0020,HN_material,PRJ-2201_Conveyor/assy/מסילה קצר PA-18642.step,PA-13909,re-exported by OpenCascade as AP203; ERP material ST37 vs SS 304,00009036_4b3b521f6e6c409ab75438fc_step_001.step
+Library/standard/PA-15141 hinge front 20x30.STEP,G0020,base,,PA-15141,ABC part,00007778_d7a349b91be24ac090a38847_step_000.step
+Library/standard/PA-17119_HOLDER-T8-ST37.STEP,H0021,HN_material,PRJ-2307_Packaging_Line/parts/PA-10450_HOLDER-T8.step,PA-17119,re-exported by OpenCascade as AP214CD; ERP material ST37 vs POM,00004711_d2b14c86ceed403b8a9967eb_step_000.step
+Library/standard/PA-19130_BLOCK-MOTOR-LOWER.step,G0008,base,,PA-19130,ABC part,00009845_95550acc103142adbb46516a_step_001.step
+Library/standard/טבעת הרכבה t2 PA-16016.STEP,G0022,base,,PA-16016,ABC part,00002040_f5f0cb8f8edf486a9023ef1d_step_014.step
+PRJ-2201_Conveyor/_final/100-1420 holder cylinder 60x25_from customer_revC.STEP,G0000,B,Library/standard/100-1420 holder cylinder 60x25.stp,100-1420,re-exported by OpenCascade as AP242DIS,00008329_d680b93a2dfa45658ae376f0_step_003.step
+PRJ-2201_Conveyor/_final/100-1420 holder cylinder 60x25_reexport.STP,G0000,B,Library/standard/100-1420 holder cylinder 60x25.stp,100-1420,re-exported by OpenCascade as AP203,00008329_d680b93a2dfa45658ae376f0_step_003.step
+PRJ-2201_Conveyor/_final/PA-18643 RAIL SHORT MOD.STP,G0010,E,PRJ-2201_Conveyor/assy/מסילה קצר PA-18642.step,PA-18643,hole: hole d=19.8 mm (4.9% of size),00009036_4b3b521f6e6c409ab75438fc_step_001.step
+PRJ-2201_Conveyor/_final/pnimi-achori-galgal.step,G0024,F,PRJ-2201_Conveyor/assy/300-6572_WHEEL-INNER-REAR.STP,,byte copy; name variant: word_order+translit,00006375_7665b1b3c6f346c2add9061b_step_000.step
+PRJ-2201_Conveyor/_old/300-9925_CAP-FAN-SMALL_pos_new.STP,G0026,C,PRJ-2201_Conveyor/parts/כובע מאוורר קטן 300-9925.stp,300-9925,random rotation + translation,00004326_00e12f076c9f44728924a007_step_038.step
+PRJ-2201_Conveyor/_old/PA-14174_POST-LOWER-CABLE_in_assy_v4.STP,G0023,C,PRJ-2307_Packaging_Line/purchased/PA-14174_עמוד תחתון כבל.stp,PA-14174,random rotation + translation,00007643_6526b891181043aaa8f2dc6e_step_002.step
+PRJ-2201_Conveyor/assy/300-6572_WHEEL-INNER-REAR.STP,G0024,base,,300-6572,ABC part,00006375_7665b1b3c6f346c2add9061b_step_000.step
+PRJ-2201_Conveyor/assy/300-6573_WHEEL-INNER-REAR-THICK.step,H0023,HN_thickness,PRJ-2201_Conveyor/assy/300-6572_WHEEL-INNER-REAR.STP,300-6573,thickness/size change: face moved in by 49.05% of the part extent (62 mm),00006375_7665b1b3c6f346c2add9061b_step_000.step
+PRJ-2201_Conveyor/assy/PA-13652_SHAFT-SIDE-UPPER_ישן.stp,G0028,base,,PA-13652,ABC part,00004408_2f3c47ebc0054b4f8e0e4cf4_step_006.step
+PRJ-2201_Conveyor/assy/PA-14912 frame motor 80x20.step,G0017,base,,PA-14912,ABC part,00001021_ca4cf9693d6d4a98b515ba99_step_002.step
+PRJ-2201_Conveyor/assy/מסילה קצר PA-18642.step,G0010,base,,PA-18642,ABC part,00009036_4b3b521f6e6c409ab75438fc_step_001.step
+PRJ-2201_Conveyor/assy/צלע מרובע PA-12220.step,G0002,base,,PA-12220,ABC part,00000476_0fc8cc17c6af48dabe36c8f2_step_001.step
+PRJ-2201_Conveyor/parts/300-4196.STEP,G0007,base,,300-4196,ABC part,00002171_af3af6b131e747f38dbcb2c5_step_006.step
+PRJ-2201_Conveyor/parts/PA-13560_TRAY-FAN-SMALL.STP,G0015,base,,PA-13560,ABC part,00001410_49414db2dd594dc6a3907cf3_step_013.step
+PRJ-2201_Conveyor/parts/PA-17333.STP,G0014,base,,PA-17333,ABC part,00005949_3c9e73d0c40f41a99ff0900b_step_000.step
+PRJ-2201_Conveyor/parts/גל גדול t5 PA-11653.STEP,G0004,base,,PA-11653,ABC part,00000176_b21aa794b6b64d87a57c245e_step_006.step
+PRJ-2201_Conveyor/parts/כובע מאוורר קטן 300-9925.stp,G0026,base,,300-9925,ABC part,00004326_00e12f076c9f44728924a007_step_038.step
+PRJ-2307_Packaging_Line/_old/CAP_LARGE_D6_MP-03080_backup.step,G0021,F,PRJ-2307_Packaging_Line/parts/MP-03080_FINAL2.stp,MP-03080,re-exported by OpenCascade as AP203; name variant: abbrev,00000224_97b354a907114b7183faa9c4_step_002.step
+PRJ-2307_Packaging_Line/_old/MP-02907_HANDLE-SENSOR_AP242.step,G0016,B,Library/standard/MP-02907 handle sensor.STEP,MP-02907,re-exported by OpenCascade as AP242DIS,00009893_086229ea796640d29acd68ff_step_028.step
+PRJ-2307_Packaging_Line/_old/PA-10669 knob outer front.STP,G0007,A,PRJ-2201_Conveyor/parts/300-4196.STEP,PA-10669,byte copy,00002171_af3af6b131e747f38dbcb2c5_step_006.step
+PRJ-2307_Packaging_Line/parts/200-3544.STP,G0001,base,,200-3544,ABC part,00007472_aedef5a2772c4b038261bbed_step_004.step
+PRJ-2307_Packaging_Line/parts/200-3545_BLOCK - Copy.step,G0012,base,,200-3545,ABC part,00000816_36e6258346004cabb4c091b2_step_004.step
+PRJ-2307_Packaging_Line/parts/300-1019_SHAFT-VALVE.step,G0009,base,,300-1019,ABC part,00002937_bb2168e3a77643a69ad6b81f_step_001.step
+PRJ-2307_Packaging_Line/parts/MP-03080_FINAL2.stp,G0021,base,,MP-03080,ABC part,00000224_97b354a907114b7183faa9c4_step_002.step
+PRJ-2307_Packaging_Line/parts/PA-10450_HOLDER-T8.step,G0013,base,,PA-10450,ABC part,00004711_d2b14c86ceed403b8a9967eb_step_000.step
+PRJ-2307_Packaging_Line/parts/PA-18744_BEAM-THICK.STEP,H0024,HN_thickness,PRJ-2410_Robot_Cell/mech/PA-18693_קורה.STP,PA-18744,thickness/size change: face moved out by 41.37% of the part extent (20.5 mm),00005534_6a94fbfec8d64c2ba6017575_step_009.step
+PRJ-2307_Packaging_Line/parts/כפתור MP-02387.stp,G0003,base,,MP-02387,ABC part,00007862_8283431bfc7b41c3b703ad43_step_000.step
+PRJ-2307_Packaging_Line/purchased/PA-14174_עמוד תחתון כבל.stp,G0023,base,,PA-14174,ABC part,00007643_6526b891181043aaa8f2dc6e_step_002.step
+PRJ-2307_Packaging_Line/purchased/PA-18305 block motor lower.step,G0018,base,,PA-18305,ABC part,00006787_18316b3389b341bf848071f6_step_000.step
+PRJ-2410_Robot_Cell/mech/MP-03871_HOLDER-CYLINDER-60X20.STEP,G0005,base,,MP-03871,ABC part,00009963_c5c4758d62fb44ec9f945334_step_001.step
+PRJ-2410_Robot_Cell/mech/PA-12580_COUPLING-LARGE-FLAT.STP,G0029,base,,PA-12580,ABC part,00004713_d2b14c86ceed403b8a9967eb_step_002.step
+PRJ-2410_Robot_Cell/mech/PA-18693_קורה.STP,G0006,base,,PA-18693,ABC part,00005534_6a94fbfec8d64c2ba6017575_step_009.step
+PRJ-2410_Robot_Cell/mech/PA-19130 block motor lower_FINAL2.STP,G0008,A,Library/standard/PA-19130_BLOCK-MOTOR-LOWER.step,PA-19130,byte copy,00009845_95550acc103142adbb46516a_step_001.step
+PRJ-2410_Robot_Cell/mech/PA-19418_TRAY-UPPER.step,G0025,base,,PA-19418,ABC part,00001119_49c854d1f0ec4a079e595558_step_002.step
+PRJ-2410_Robot_Cell/mech/_old/PA-11518_KNOB-THICK.step,H0025,HN_thickness,PRJ-2307_Packaging_Line/parts/כפתור MP-02387.stp,PA-11518,thickness/size change: face moved out by 55.67% of the part extent (1.64 mm),00007862_8283431bfc7b41c3b703ad43_step_000.step
+PRJ-2410_Robot_Cell/mech/_old/PA-12580_COUPLING-LARGE-FLAT_in_assy.STP,G0029,C,PRJ-2410_Robot_Cell/mech/PA-12580_COUPLING-LARGE-FLAT.STP,PA-12580,random rotation + translation,00004713_d2b14c86ceed403b8a9967eb_step_002.step
+PRJ-2410_Robot_Cell/mech/כפתור t6 MP-03586.STP,G0019,base,,MP-03586,ABC part,00006545_96dfd8eaa8704d3990e00400_step_001.step
+Users/dana/Desktop/PA-12875_חיישן_ידית_old.STP,G0016,F,Library/standard/MP-02907 handle sensor.STEP,PA-12875,re-exported by OpenCascade as AP214CD; name variant: word_order+hebrew,00009893_086229ea796640d29acd68ff_step_028.step
+Users/dana/Desktop/PA-18028_BLOCK.step,G0001,A,PRJ-2307_Packaging_Line/parts/200-3544.STP,PA-18028,byte copy,00007472_aedef5a2772c4b038261bbed_step_004.step
+from_supplier/Copy of PA-11360 block motor lower_INCH.STEP,G0008,D,Library/standard/PA-19130_BLOCK-MOTOR-LOWER.step,PA-11360,file written in inches (declared INCH),00009845_95550acc103142adbb46516a_step_001.step
+from_supplier/PA-10844_SHAFT-LARGE-T5_inch_old.step,G0004,D,PRJ-2201_Conveyor/parts/גל גדול t5 PA-11653.STEP,PA-10844,file written in inches (declared INCH),00000176_b21aa794b6b64d87a57c245e_step_006.step
+from_supplier/PA-17476_CAP-FAN-SMALL_INCH.step,G0026,D,PRJ-2201_Conveyor/parts/כובע מאוורר קטן 300-9925.stp,PA-17476,file written in inches (declared INCH),00004326_00e12f076c9f44728924a007_step_038.step
+שונות/PA-18307_BLOCK-MOTOR-LOWER-LH.step,H0026,HN_mirror,PRJ-2307_Packaging_Line/purchased/PA-18305 block motor lower.step,PA-18307,mirror image,00006787_18316b3389b341bf848071f6_step_000.step
+שונות/PA-19418_TRAY-UPPER_revB.step,G0025,E,PRJ-2410_Robot_Cell/mech/PA-19418_TRAY-UPPER.step,PA-19418,hole: hole d=10.6 mm (7.8% of size),00001119_49c854d1f0ec4a079e595558_step_002.step

@@ -1,0 +1,710 @@
+{
+ "seed": 23,
+ "abc_folders": [
+  "/home/claude/rawdata/abc1",
+  "/home/claude/rawdata/abc2"
+ ],
+ "args": {
+  "abc": [
+   "/home/claude/rawdata/abc1",
+   "/home/claude/rawdata/abc2"
+  ],
+  "n_base": 500,
+  "screen_factor": 3.0,
+  "seed": 23,
+  "out": "/home/claude/datasets/test",
+  "workers": 2,
+  "timeout": 60,
+  "rates": "A=0.06,B=0.06,C=0.06,D=0.06,E=0.08,F=0.10",
+  "hn": "name=0.05,material=0.03,thickness=0.03,mirror=0.02",
+  "mirror_candidates": 8
+ },
+ "screen": {
+  "screened": 1500,
+  "readable": 1500,
+  "single_body_valid": 1033,
+  "natural_duplicates_removed": 189,
+  "clean": 844
+ },
+ "chirality_checks": {
+  "42": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "96": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "365": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "280": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.0633055334415964e-17,
+    "p95": 5.601535163103475e-05,
+    "p99": 0.00020732831608607675,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 167.05986976769734
+  },
+  "72": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "237": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.5549057886375555e-07,
+    "p95": 0.00019889252090144423,
+    "p99": 0.0004167375023746536,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 58.3496190692886
+  },
+  "130": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.1932378133976248e-17,
+    "p95": 4.548716553455457e-17,
+    "p99": 1.3009129941620733e-16,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 136.8200303222814
+  },
+  "331": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.005455622826346631,
+    "p95": 0.01619079959031993,
+    "p99": 0.020219992925107327,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 144.5025954530848
+  },
+  "457": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "491": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.470239780101597e-07,
+    "p95": 1.6836457551015335e-05,
+    "p99": 0.00021437407251000606,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 38.58607129797052
+  },
+  "146": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "197": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.000764498828591129,
+    "p95": 0.01885290312754271,
+    "p99": 0.028277220969091302,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 76.27319621181876
+  },
+  "381": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.1992843241853827e-17,
+    "p95": 5.519873428833171e-17,
+    "p99": 6.28720802534939e-17,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 15194.762255745367
+  },
+  "477": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 6.987400490789098e-17,
+    "p95": 1.3972586812513192e-16,
+    "p99": 1.4401639757470424e-16,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 125.32457887022801
+  },
+  "144": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.0,
+    "p95": 0.032802614008342564,
+    "p99": 0.04569232817953208,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 1580.9991361414532
+  },
+  "19": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 7.183626607040102e-11,
+    "p95": 0.001047024170658985,
+    "p99": 0.001260472595029465,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 80.91283814169628
+  },
+  "95": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.030754158720246786,
+    "p95": 0.06359783868871399,
+    "p99": 0.07135096984446587,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 87.27561456248871
+  },
+  "324": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.403549974142145e-07,
+    "p95": 0.0013098464159520455,
+    "p99": 0.0015922807655785998,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 66.37240949012862
+  },
+  "297": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.0650374389949024e-08,
+    "p95": 5.070928156935778e-07,
+    "p99": 5.868326516425646e-07,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 255.64551592101682
+  },
+  "357": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "148": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "399": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 7.447303169867875e-05,
+    "p95": 0.0014935818256895772,
+    "p99": 0.0027725438112036834,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 46.90415793935544
+  },
+  "154": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.8220775178672082e-09,
+    "p95": 0.0002558199027491347,
+    "p99": 0.0005058995889587,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 326.77801447557613
+  },
+  "106": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "187": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.628646016153188e-16,
+    "p95": 0.0007367850768151096,
+    "p99": 0.000766988234884603,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 152.69736643167747
+  },
+  "15": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "195": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "375": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "337": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 0.0,
+    "p95": 9.136593629071761e-17,
+    "p99": 0.00015351560145563116,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 38.88444449905387
+  },
+  "103": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "418": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "341": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "307": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.621256219006692e-07,
+    "p95": 0.0008492983916747283,
+    "p99": 0.0009518210472157558,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 70.98334859625996
+  },
+  "201": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "343": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.1598788153869969e-08,
+    "p95": 0.0006239145644071567,
+    "p99": 0.0009696958960477689,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 30.807603273536408
+  },
+  "473": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 9.29692535437126e-16,
+    "p95": 0.00034509561018145426,
+    "p99": 0.00037393871148418275,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 44.90128094475704
+  },
+  "422": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.9586251900782467e-07,
+    "p95": 0.000860591972157861,
+    "p99": 0.0011248836688867205,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 177.4543387099502
+  },
+  "134": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "132": {
+   "chiral": null,
+   "best_alignment": {
+    "p50": 5.529088249350445e-08,
+    "p95": 0.0013396441107353713,
+    "p99": 0.0032165714574123585,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 282.59805107950064
+  },
+  "241": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.378150667841639e-16,
+    "p95": 1.4032386644267503e-15,
+    "p99": 1.5645230364552881e-15,
+    "signs": [
+     -1,
+     -1,
+     1
+    ]
+   },
+   "size": 39.24283403629254
+  },
+  "265": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.0005163107189316645,
+    "p95": 0.03211554321455225,
+    "p99": 0.058649624162005226,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 1507.7441628717618
+  },
+  "378": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.004847959021633268,
+    "p95": 0.027132335830451867,
+    "p99": 0.03518930427882321,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 72.54774584937337
+  },
+  "492": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "204": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "363": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "348": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.416088174095219e-06,
+    "p95": 4.3870021737201494e-05,
+    "p99": 0.0010019749932733161,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 116.96869162129312
+  },
+  "49": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.737778442039103e-17,
+    "p95": 0.0004402234246690275,
+    "p99": 0.0007933303275199349,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 163.3814405053402
+  },
+  "14": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "346": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "26": {
+   "chiral": null,
+   "best_alignment": {
+    "p50": 6.712764123101074e-05,
+    "p95": 0.0008362472174185433,
+    "p99": 0.0030673985378305907,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 38.75443042301784
+  },
+  "452": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "176": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.003753342679851157,
+    "p95": 0.05721141180422361,
+    "p99": 0.08383831382208522,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 76.2981665190599
+  },
+  "112": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "463": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.4999568804287355e-16,
+    "p95": 3.367221583317342e-05,
+    "p99": 0.0004189013348432009,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 47.37087745862431
+  },
+  "40": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "353": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "461": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "261": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.3239884253946522e-17,
+    "p95": 2.648785684056235e-17,
+    "p99": 8.473525922525775e-17,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 1341.6709733476387
+  },
+  "413": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.897848821577026e-05,
+    "p95": 4.6920385093463605e-05,
+    "p99": 0.0005619068821029587,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 480.79621491263975
+  },
+  "451": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "391": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 9.28221510414642e-09,
+    "p95": 0.0008657423128210868,
+    "p99": 0.0009533360221903299,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 31.488445028361344
+  },
+  "306": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.9908986271708753e-15,
+    "p95": 0.0009432851052444487,
+    "p99": 0.0009718496786572102,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 95.57905639499553
+  },
+  "334": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 9.349246491045457e-18,
+    "p95": 3.739698596418183e-17,
+    "p99": 7.479397192836366e-17,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 95.0000003263158
+  },
+  "476": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "392": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.001009699568523882,
+    "p95": 0.030947374225253805,
+    "p99": 0.03753281935507259,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 103.38516486438198
+  },
+  "28": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "498": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.2976728606914235e-16,
+    "p95": 2.994404068272023e-16,
+    "p99": 2.994404068272023e-16,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 71.18705955106442
+  },
+  "94": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 0.0,
+    "p95": 0.00101199609662259,
+    "p99": 0.0013337882065712534,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 44.44227312570124
+  },
+  "24": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "13": {
+   "chiral": null,
+   "reason": "timeout"
+  }
+ },
+ "counts": {
+  "base": 500,
+  "A": 30,
+  "B": 30,
+  "C": 30,
+  "D": 30,
+  "E": 40,
+  "F": 50,
+  "HN_material": 15,
+  "HN_thickness": 15,
+  "HN_mirror": 8
+ },
+ "files": 748,
+ "planted_A_to_F": 210,
+ "planted_share": 0.2807,
+ "hn_name_pairs": 25,
+ "erp_rows": 621,
+ "failed_variants": [],
+ "build_seconds": 1012.8
+}

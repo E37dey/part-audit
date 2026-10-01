@@ -1,0 +1,328 @@
+{
+ "seed": 11,
+ "abc_folders": [
+  "/home/claude/rawdata/abc0"
+ ],
+ "args": {
+  "abc": [
+   "/home/claude/rawdata/abc0"
+  ],
+  "n_base": 250,
+  "screen_factor": 3.0,
+  "seed": 11,
+  "out": "/home/claude/datasets/dev",
+  "workers": 2,
+  "timeout": 60,
+  "rates": "A=0.06,B=0.06,C=0.06,D=0.06,E=0.12,F=0.20",
+  "hn": "name=0.05,material=0.03,thickness=0.03,mirror=0.02",
+  "mirror_candidates": 8
+ },
+ "screen": {
+  "screened": 750,
+  "readable": 750,
+  "single_body_valid": 468,
+  "natural_duplicates_removed": 22,
+  "clean": 446
+ },
+ "chirality_checks": {
+  "159": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "164": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "146": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "87": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "18": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.2085938073204705e-17,
+    "p95": 1.7260811728731415e-15,
+    "p99": 2.741362755553957e-15,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 321.6186263093688
+  },
+  "145": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "43": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "153": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "63": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "174": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 0.0,
+    "p95": 0.0006449069839088525,
+    "p99": 0.0008336926266750412,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 228.351414997521
+  },
+  "100": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "39": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "48": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "134": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "74": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "23": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "238": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.531010449516182e-17,
+    "p95": 4.72846832577607e-17,
+    "p99": 5.00044063759653e-17,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 579.0155440825401
+  },
+  "11": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.0007807954576858691,
+    "p95": 0.04599745249275204,
+    "p99": 0.05570396401055059,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 71.56116298943166
+  },
+  "29": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "196": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.9204928454121423e-11,
+    "p95": 0.0003429497003903612,
+    "p99": 0.0004921675167832441,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 40.7636334316142
+  },
+  "67": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.361717167055012e-10,
+    "p95": 4.280325339564574e-05,
+    "p99": 0.00010067146162477925,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 528.3876326173377
+  },
+  "103": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "184": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.764340392991241e-06,
+    "p95": 0.0002507555206006981,
+    "p99": 0.0003552994709270281,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 178.4610810446748
+  },
+  "242": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "14": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 8.327193188658602e-08,
+    "p95": 0.00046436891719379454,
+    "p99": 0.0005954023624214275,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 177.8559355606159
+  },
+  "1": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.2769033979431177e-17,
+    "p95": 1.2330718794269352e-06,
+    "p99": 2.4124900718123003e-05,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 39.008173139996956
+  },
+  "111": {
+   "chiral": null,
+   "best_alignment": {
+    "p50": 4.0431400963234084e-05,
+    "p95": 0.006440807016239168,
+    "p99": 0.016933112058803105,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 144.56832749285607
+  },
+  "2": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "169": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "207": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.967431135672059e-06,
+    "p95": 0.001885521794570674,
+    "p99": 0.0022746517205902285,
+    "signs": [
+     -1,
+     -1,
+     1
+    ]
+   },
+   "size": 101.31963388690572
+  },
+  "93": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.360701179705319e-17,
+    "p95": 6.28291051108071e-05,
+    "p99": 0.0002731844264176859,
+    "signs": [
+     -1,
+     -1,
+     1
+    ]
+   },
+   "size": 63.865170766545354
+  },
+  "56": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "28": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "68": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.563481087811023e-16,
+    "p95": 3.911118762377921e-16,
+    "p99": 4.3939772668989903e-16,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 76.81145781717726
+  },
+  "90": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.001994208135778534,
+    "p95": 0.019197699321898937,
+    "p99": 0.026129852850833617,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 94.58843162402229
+  }
+ },
+ "counts": {
+  "base": 250,
+  "A": 15,
+  "B": 15,
+  "C": 15,
+  "D": 15,
+  "E": 30,
+  "F": 50,
+  "HN_material": 8,
+  "HN_thickness": 8,
+  "HN_mirror": 2
+ },
+ "files": 408,
+ "planted_A_to_F": 140,
+ "planted_share": 0.3431,
+ "hn_name_pairs": 12,
+ "erp_rows": 318,
+ "failed_variants": [],
+ "build_seconds": 286.7
+}

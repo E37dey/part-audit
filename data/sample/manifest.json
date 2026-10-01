@@ -1,0 +1,214 @@
+{
+ "seed": 7,
+ "abc_folders": [
+  "/home/claude/rawdata/abc0"
+ ],
+ "args": {
+  "abc": [
+   "/home/claude/rawdata/abc0"
+  ],
+  "n_base": 30,
+  "screen_factor": 3.0,
+  "seed": 7,
+  "out": "data/sample",
+  "workers": 2,
+  "timeout": 60,
+  "rates": "A=0.1,B=0.1,C=0.1,D=0.1,E=0.15,F=0.15",
+  "hn": "name=0.1,material=0.1,thickness=0.1,mirror=0.1",
+  "mirror_candidates": 8
+ },
+ "screen": {
+  "screened": 90,
+  "readable": 90,
+  "single_body_valid": 48,
+  "natural_duplicates_removed": 0,
+  "clean": 48
+ },
+ "chirality_checks": {
+  "18": {
+   "chiral": true,
+   "best_alignment": {
+    "p50": 0.0018928456857355168,
+    "p95": 0.02353409863895279,
+    "p99": 0.041750103572927286,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 160.20069412907603
+  },
+  "9": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "2": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "1": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.3561080991288999e-16,
+    "p95": 1.3561080991288999e-16,
+    "p99": 1.3561080991288999e-16,
+    "signs": [
+     -1,
+     -1,
+     1
+    ]
+   },
+   "size": 419.165838603291
+  },
+  "6": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 1.276936521889231e-10,
+    "p95": 9.97933181173536e-10,
+    "p99": 0.0005630058634905761,
+    "signs": [
+     -1,
+     -1,
+     1
+    ]
+   },
+   "size": 167.00799000822207
+  },
+  "7": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "19": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 3.1342009493145926e-06,
+    "p95": 6.554911591418929e-05,
+    "p99": 0.00016284487517506693,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 97.31218687374097
+  },
+  "29": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "16": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "23": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "3": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.2769033979431177e-17,
+    "p95": 1.2330718794269352e-06,
+    "p99": 2.4124900718123003e-05,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 39.008173139996956
+  },
+  "5": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.0399353003645065e-11,
+    "p95": 0.00048667545680937055,
+    "p99": 0.0006044512030071442,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 184.92491625192926
+  },
+  "17": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "26": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "4": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "10": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 2.7233956814982223e-16,
+    "p95": 6.651467205148867e-16,
+    "p99": 7.17186470509148e-16,
+    "signs": [
+     -1,
+     1,
+     -1
+    ]
+   },
+   "size": 406.2019204779814
+  },
+  "21": {
+   "chiral": false,
+   "best_alignment": {
+    "p50": 5.6251845796435284e-05,
+    "p95": 0.0006283923070816539,
+    "p99": 0.0008862121254666791,
+    "signs": [
+     1,
+     -1,
+     -1
+    ]
+   },
+   "size": 441.7233487626068
+  },
+  "28": {
+   "chiral": null,
+   "reason": "near-degenerate inertia, alignment ambiguous"
+  },
+  "20": {
+   "chiral": null,
+   "best_alignment": {
+    "p50": 0.0,
+    "p95": 0.0013743143683429243,
+    "p99": 0.005656411804216317,
+    "signs": [
+     1,
+     1,
+     1
+    ]
+   },
+   "size": 277.00081576276216
+  }
+ },
+ "counts": {
+  "base": 30,
+  "A": 3,
+  "B": 3,
+  "C": 3,
+  "D": 3,
+  "E": 4,
+  "F": 4,
+  "HN_material": 3,
+  "HN_thickness": 3,
+  "HN_mirror": 1
+ },
+ "files": 57,
+ "planted_A_to_F": 20,
+ "planted_share": 0.3509,
+ "hn_name_pairs": 3,
+ "erp_rows": 43,
+ "failed_variants": [],
+ "build_seconds": 143.7
+}

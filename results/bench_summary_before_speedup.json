@@ -1,0 +1,42 @@
+{
+ "files": 5000,
+ "total_MB": 1536.7,
+ "size_kb_median": 89.5,
+ "size_kb_max": 2889.8,
+ "workers": 2,
+ "cpu_count": 2,
+ "timeout_s": 60.0,
+ "wall_s_total": 1800.2,
+ "wall_min_total": 30.0,
+ "stage_s": {
+  "scan_s": 122.9,
+  "geometry_s": 911.6,
+  "geometry_wall_s": 911.6,
+  "geometry_per_file_mean_s": 0.4,
+  "geometry_per_file_median_s": 0.1,
+  "geometry_per_file_p90_s": 1.0,
+  "geometry_per_file_max_s": 25.1,
+  "scoring_s": 760.9,
+  "shape_s": 718.5,
+  "total_s": 1796.3
+ },
+ "geometry_per_file_s": {
+  "mean_s": 0.364,
+  "median_s": 0.082,
+  "p90_s": 1.049,
+  "max_s": 25.05
+ },
+ "seconds_per_file_wall": 0.36,
+ "errors_by_reason": {
+  "no usable geometry": 2
+ },
+ "flagged_pairs": 9604,
+ "duplicate_groups": 222,
+ "peak_rss_MB_largest_child": 589.8,
+ "machine": {
+  "platform": "Linux-6.18.44-fc-v50-x86_64-with-glibc2.39",
+  "python": "3.11.15",
+  "processor": "x86_64"
+ },
+ "note": "cold cache; files sampled at random from ABC chunks (<= 3 MB each), natural mix of valid, multi-body and broken models"
+}

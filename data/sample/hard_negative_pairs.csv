@@ -1,0 +1,11 @@
+file_a,file_b,kind,note
+PRJ-2307_Packaging_Line/parts/200-3544.STP,PRJ-2307_Packaging_Line/parts/200-3545_BLOCK - Copy.step,HN_name,"same description, sequential part number"
+PRJ-2410_Robot_Cell/mech/MP-03871_HOLDER-CYLINDER-60X20.STEP,Library/standard/100-1420 holder cylinder 60x25.stp,HN_name,"same description, different dimension"
+PRJ-2307_Packaging_Line/purchased/PA-18305 block motor lower.step,Library/standard/PA-19130_BLOCK-MOTOR-LOWER.step,HN_name,same description
+PRJ-2201_Conveyor/assy/מסילה קצר PA-18642.step,Library/standard/PA-13909_RAIL-SHORT-ST37.STEP,HN_material,re-exported by OpenCascade as AP203; ERP material ST37 vs SS 304
+PRJ-2307_Packaging_Line/parts/PA-10450_HOLDER-T8.step,Library/standard/PA-17119_HOLDER-T8-ST37.STEP,HN_material,re-exported by OpenCascade as AP214CD; ERP material ST37 vs POM
+PRJ-2410_Robot_Cell/mech/PA-18693_קורה.STP,Library/standard/100-1858_BEAM-POM.STEP,HN_material,byte copy; ERP material POM vs AL 6061
+PRJ-2201_Conveyor/assy/300-6572_WHEEL-INNER-REAR.STP,PRJ-2201_Conveyor/assy/300-6573_WHEEL-INNER-REAR-THICK.step,HN_thickness,thickness/size change: face moved in by 49.05% of the part extent (62 mm)
+PRJ-2410_Robot_Cell/mech/PA-18693_קורה.STP,PRJ-2307_Packaging_Line/parts/PA-18744_BEAM-THICK.STEP,HN_thickness,thickness/size change: face moved out by 41.37% of the part extent (20.5 mm)
+PRJ-2307_Packaging_Line/parts/כפתור MP-02387.stp,PRJ-2410_Robot_Cell/mech/_old/PA-11518_KNOB-THICK.step,HN_thickness,thickness/size change: face moved out by 55.67% of the part extent (1.64 mm)
+PRJ-2307_Packaging_Line/purchased/PA-18305 block motor lower.step,שונות/PA-18307_BLOCK-MOTOR-LOWER-LH.step,HN_mirror,mirror image

@@ -24,6 +24,8 @@ from part_audit.scoring import Thresholds, build_pairs, duplicate_groups, propos
 GRIDS = {  # geometry and name thresholds act on different metrics, so they are swept separately
     "geo": {"geo_near": [0.05, 0.08, 0.10, 0.15], "shape_near_excess50": [2.0, 3.0, 4.0]},
     "names": {"name_similar": [0.85, 0.90], "name_k0": [2, 3, 4], "name_partial_factor": [0.8, 0.85, 0.9]},
+    # post-hoc sensitivity only (reported separately, never used to choose thresholds)
+    "names_sensitivity": {"name_similar": [0.85, 0.90], "name_k0": [3, 6, 10], "name_partial_factor": [0.85]},
 }
 
 

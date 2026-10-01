@@ -36,6 +36,44 @@ def metrics_table(m: dict) -> str:
     return "\n".join(rows)
 
 
+def fp_line(m: dict) -> str:
+    s = m.get("summary", {})
+    if s.get("FP rate") is None:
+        return ""
+    return (f"False positives on truly different parts: {s['false positives (different parts)']} of "
+            f"{s['flagged pairs']} flagged pairs = **{pct(s['FP rate'], 2)}** (target <= 2%).")
+
+
+def error_notes(d: Path, name: str) -> list[str]:
+    """Counts of the remaining errors by cause, computed from the evaluation details CSV."""
+    import csv
+    p = d / name
+    if not p.exists():
+        return []
+    rows = list(csv.DictReader(open(p, encoding="utf-8-sig")))
+    f_miss = [r for r in rows if r["type"] == "F" and r["set"] == "positive" and r["correct"] == "False"]
+    generic = sum(1 for r in f_miss if "generic description" in r["reason"])
+    f_fp = [r for r in rows if r["type"] == "F" and r["set"] == "false_positive"]
+    other = [r for r in rows if r["correct"] == "False" and r["type"] != "F"]
+    out = [f"- Name layer (F): {len(f_miss)} of the F variants were not linked by name alone; {generic} of them "
+           "because the description is shared by many part numbers (generic, discounted on purpose) and "
+           f"{len(f_miss) - generic} because a transliteration or typo was not recognised. "
+           f"{len(f_fp)} name links pointed to a different part with the same or nearly the same description. "
+           "With geometry (full pipeline) every F variant was linked."]
+    for r in other:
+        got = r["category"] or "-"
+        if r["predicted_geo"] and r["predicted_geo"] not in got:
+            got += f" (geometry: {r['predicted_geo']})"
+        out.append(f"- {r['set'].replace('_', ' ')} ({r['type']}): `{r['file_a'].split('/')[-1]}` vs "
+                   f"`{r['file_b'].split('/')[-1]}` - expected {r['expected']}, got {got}.")
+    if any(r["type"] == "HN_mirror" for r in other):
+        out.append("- Missed mirror images are parts whose handedness is weak: the exact-distance check used to "
+                   "label them finds a difference, but the skewness test has no clear sign and 4,096 surface samples "
+                   "cannot separate the reflection from a rotation. Copies of such a part are then merged with its "
+                   "mirror twin, which also explains the related false positives above.")
+    return out
+
+
 def hn_table(m: dict) -> str:
     rows = ["| Hard negative | Pairs | Handled correctly | Outcome counts |", "|---|---:|---:|---|"]
     for r in m["per_type"]:
@@ -78,12 +116,16 @@ def nist_section(n: dict) -> str:
         cats = ", ".join(f"{k}: {v}" for k, v in sorted(d.get("by_category", {}).items())) or "-"
         out.append(f"| {rel} | {d.get('pairs', 0)} | {cats} |")
     out += ["", "Pairs of the same test case (tool category, largest property difference):", "",
-            "| File A | File B | Category | Max property diff |", "|---|---|---|---:|"]
+            "| File A (archive) | File B (archive) | Category | Max relative property difference |", "|---|---|---|---:|"]
+    def short(f):
+        parts_ = f.split("/")
+        src = "PMI-STEP" if parts_[0].startswith("NIST-PMI") else "CAD-models"
+        return f"{parts_[-1]} ({src})"
     for r in n["pairs"]:
         if r["relation"] == "same test case":
             mr = r["max_rel"]
-            out.append(f"| {r['file_a'].split('/')[-1]} | {r['file_b'].split('/')[-1]} | {r['category']} | "
-                       f"{'-' if mr is None else f'{100 * mr:.4f}%'} |")
+            out.append(f"| {short(r['file_a'])} | {short(r['file_b'])} | {r['category']} | "
+                       f"{'-' if mr is None else f'{mr:.1e}'} |")
     return "\n".join(out)
 
 
@@ -105,7 +147,10 @@ def speed_section(feas: dict | None, bench: dict | None) -> str:
                    f"**{b['wall_min_total']} min total** ({b['seconds_per_file_wall']} s per file wall-clock). "
                    f"Geometry per file in a worker: mean {g.get('mean_s', g.get('mean'))} s, median {g.get('median_s', g.get('median'))} s, "
                    f"p90 {g.get('p90_s', g.get('p90'))} s, max {g.get('max_s', g.get('max'))} s. "
-                   f"Stages: " + ", ".join(f"{k} {v} s" for k, v in b["stage_s"].items()) + ". "
+                   "Stages: " + ", ".join(f"{lbl} {b['stage_s'][k]} s" for k, lbl in
+                                          (("scan_s", "scan + hashes"), ("geometry_s", "geometry (L3)"),
+                                           ("scoring_s", "scoring incl. L3b"), ("shape_s", "of which L3b"))
+                                          if k in b["stage_s"]) + f" ({b.get('shape_checks', '?')} L3b checks). "
                    f"Errors/skips: " + (", ".join(f"{k}: {v}" for k, v in b["errors_by_reason"].items()) or "none") + ". "
                    f"Peak RSS of the largest process: {b['peak_rss_MB_largest_child']} MB.")
     return "\n".join(out)
@@ -121,6 +166,8 @@ def main() -> None:
     dm, tm = load(d, "dev_manifest.json"), load(d, "test_manifest.json")
     nist, feas, bench, th = load(d, "nist_pairs.json"), load(d, "feasibility_l3.json"), load(d, "bench_summary.json"), \
         load(d, "thresholds.json")
+    bench_before = load(d, "bench_summary_before_speedup.json")
+    tune_geo, tune_names = load(d, "dev_tune_geo.json"), load(d, "dev_tune_names.json")
     parts = ["# Measured results", "",
              "All numbers below were produced by the scripts in `tools/` on the data described; nothing is estimated. "
              "Synthetic data: accuracy is an upper bound for real factory data.", "",
@@ -130,21 +177,28 @@ def main() -> None:
     if primary:
         parts += ["## Held-out test set", "",
                   "Thresholds were tuned on the dev set and frozen; the test set was built afterwards and scored "
-                  "once with the frozen code and thresholds:", "", metrics_table(primary), "", hn_table(primary), ""]
+                  "once with the frozen code and thresholds:", "", metrics_table(primary), "", fp_line(primary), "",
+                  hn_table(primary), ""]
+        notes = error_notes(d, "test_eval_details_frozen.csv" if frozen else "test_eval_details.csv")
+        if notes:
+            parts += ["Remaining errors in this run:", ""] + notes + [""]
     if frozen and test:
         diff = []
         old_rows = {r["type"]: r for r in frozen["per_type"]}
         for r in test["per_type"]:
             o = old_rows.get(r["type"])
             if o and any(o.get(k) != r.get(k) for k in ("tp", "fp", "fn", "precision", "recall")):
-                diff.append(f"| {r['type']} | {pct(o['precision'])} / {pct(o['recall'])} | "
-                            f"{pct(r['precision'])} / {pct(r['recall'])} |")
+                if r.get("precision") is None and r.get("recall") is None:
+                    diff.append(f"| {r['type']} | {o['fp']} FP of {o['n_pairs']} | {r['fp']} FP of {r['n_pairs']} |")
+                else:
+                    diff.append(f"| {r['type']} | {pct(o['precision'])} / {pct(o['recall'])} | "
+                                f"{pct(r['precision'])} / {pct(r['recall'])} |")
         parts += ["### After one post-hoc fix", "",
                   "Error analysis on the test run found one algorithmic bug (not a threshold): for nearly "
                   "axisymmetric parts the L3b rotation search used a 10-degree grid, so a rotated copy could fit "
                   "worse than a reflection and was reported as a mirror image. The search now uses a 5-degree grid "
                   "with 0.5-degree refinement. Thresholds were not changed. Re-running dev and test with the "
-                  "fixed code changed only these rows (precision / recall):", "",
+                  "fixed code changed only these rows (precision / recall, or false positives):", "",
                   "| Row | Frozen run | After fix |", "|---|---|---|"] + (diff or ["| (no change) | | |"]) + [""]
     sens = load(d, "test_name_sensitivity.json")
     if sens:
@@ -156,18 +210,46 @@ def main() -> None:
                          f"{pct(m['R'])} | {m['F1']:.3f} |")
         parts.append("")
     if dev:
-        parts += ["## Dev set (used for tuning)", "", metrics_table(dev), "", hn_table(dev), ""]
+        parts += ["## Dev set (used for tuning)", "", metrics_table(dev), "", fp_line(dev), "", hn_table(dev), ""]
+        notes = error_notes(d, "dev_eval_details.csv")
+        if notes:
+            parts += ["Remaining errors on dev:", ""] + notes + [""]
     if nist:
         parts += ["## Real STEP files: NIST MBE PMI models", "", nist_section(nist), ""]
     if feas or bench:
         parts += ["## Speed", "", speed_section(feas, bench), ""]
+        if bench_before:
+            b = bench_before
+            parts += [f"Before the last speed-up (same 5,000 files, same machine) the run took {b['wall_min_total']} min "
+                      f"(scoring stage {b['stage_s'].get('scoring_s')} s, of which L3b shape checks "
+                      f"{b['stage_s'].get('shape_s')} s). L3b now runs only where it can change the result and in "
+                      "parallel processes; dev and test metrics were identical before and after.", ""]
+    if tune_geo or tune_names:
+        parts += ["## Threshold sweeps on the dev set", ""]
+        for title, rows, keys in (("Geometry", tune_geo, ("geo_near", "shape_near_excess50")),
+                                  ("Names", tune_names, ("name_similar", "name_k0", "name_partial_factor"))):
+            if not rows:
+                continue
+            parts += [f"{title}:", "", "| " + " | ".join(keys) + " | E P/R | F P/R/F1 | FP rate |",
+                      "|" + "---:|" * (len(keys) + 3)]
+            for r in rows:
+                m = r["metrics"]
+                parts.append("| " + " | ".join(str(r["params"][k]) for k in keys) +
+                             f" | {pct(m['E']['P'])}/{pct(m['E']['R'])} | {pct(m['F']['P'])}/{pct(m['F']['R'])}/"
+                             f"{m['F']['F1']:.3f} | {pct(m['FP_rate'])} |")
+            parts.append("")
     if th:
         parts += ["## Thresholds used", "", "```json", json.dumps(th, indent=1), "```", ""]
     (Path(a.results).parent / "RESULTS.md").write_text("\n".join(parts), encoding="utf-8")
     # short block for the README
     readme = Path(a.readme)
     if readme.exists() and primary:
-        block = ["<!-- results:start -->", metrics_table(primary), "", speed_section(None, bench), "<!-- results:end -->"]
+        block = ["<!-- results:start -->", metrics_table(primary), "", fp_line(primary), ""]
+        if frozen and test:
+            block += ["One algorithmic bug found during error analysis on this run (a rotated copy of a nearly "
+                      "axisymmetric part reported as a mirror image) was fixed afterwards without changing thresholds; "
+                      "with the fix, C recall is 100% and nothing else changed (see RESULTS.md).", ""]
+        block += [speed_section(None, bench), "<!-- results:end -->"]
         txt = readme.read_text(encoding="utf-8")
         txt = re.sub(r"<!-- results:start -->.*?<!-- results:end -->", "\n".join(block), txt, flags=re.S)
         readme.write_text(txt, encoding="utf-8")
