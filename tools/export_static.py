@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT)]
 
+MARKER = ".partaudit-static"
 PACK_LIMIT = 6_000_000          # bytes per pack file (well below the hosting limit per file)
 # pairs that get a deviation map online (identical-shape spec conflicts would show an all-blue map)
 COMPARE_CATEGORIES = ("near_identical", "mirror", "conflict")
@@ -90,9 +91,13 @@ def main() -> None:
 
     out = Path(args.out)
     if out.exists():
+        # only ever replace a folder this tool wrote before (never a workspace or anything else)
+        if any(out.iterdir()) and not (out / MARKER).exists():
+            raise SystemExit(f"{out} exists and is not an earlier static export - choose an empty or new folder")
         shutil.rmtree(out)
     data = out / "data"
     data.mkdir(parents=True)
+    (out / MARKER).write_text("written by tools/export_static.py\n", encoding="utf-8")
     client = TestClient(create_app(args.workspace))
 
     def get(path, **params):
@@ -108,10 +113,22 @@ def main() -> None:
     status = get("/api/status")
     if not status["latest_run"]:
         raise SystemExit("no finished scan in this workspace")
+    from part_audit.demo import DEMO_DIR
+
+    def is_demo(src):
+        if src["simulated"]:
+            return True
+        path = Path(src["config"].get("path") or "/nonexistent").resolve()
+        return src["kind"] == "folder" and DEMO_DIR.resolve() in path.parents
+    real = [s["name"] for s in get("/api/sources") if not is_demo(s)]
+    if real:
+        raise SystemExit("this workspace reads real systems (" + ", ".join(real) + "): the online copy is for the demo only")
     status.update({"latest_run": "latest", "workspace": "", "running": None, "static": True})
     dump(data / "status.json", status)
     dump(data / "connectors.json", get("/api/connectors"))
-    dump(data / "sources.json", get("/api/sources"))
+    # the online copy shows which systems were read, not how to reach them
+    dump(data / "sources.json", [{**s, "config": {k: v for k, v in s["config"].items() if k == "vault"}}
+                                 for s in get("/api/sources")])
     dump(data / "runs.json", get("/api/runs"))
     summary = get("/api/runs/latest/summary")
     dump(data / "summary.json", summary)

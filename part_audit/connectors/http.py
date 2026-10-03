@@ -33,8 +33,13 @@ class ReadOnlyHttp:
         self.base_url = base_url.rstrip("/") + "/"
         self.allowed = [(m.upper(), re.compile(rx)) for m, rx in (allowed or [])]
         self.retries = retries
+        # the guard also runs on every request httpx sends by itself (redirects), not only on the first one
+        hook = lambda req: self._check(req.method, str(req.url))  # noqa: E731
+        # a local address (the demo simulators, a server on this computer) is never sent through a proxy
+        local = (urlsplit(self.base_url).hostname or "") in ("127.0.0.1", "localhost", "::1")
         self.client = httpx.Client(timeout=timeout, verify=verify, auth=auth, headers=headers or {},
-                                   follow_redirects=True, trust_env=trust_env)
+                                   follow_redirects=True, trust_env=trust_env and not local,
+                                   event_hooks={"request": [hook]})
         self.calls = 0
         self.log: list[str] = []
 
@@ -95,17 +100,32 @@ class ReadOnlyHttp:
             raise ConnectorError("התשובה מהשרת אינה JSON תקין", status=r.status_code, detail=r.text[:300]) from exc
 
     def download(self, path: str, dest, **kw) -> int:
+        """Download to dest atomically: a broken transfer never leaves a partial file that later runs would reuse."""
+        import os
+        from pathlib import Path
         url = self.url(path)
         self._check("GET", url)
         self.calls += 1
+        dest = Path(dest)
+        tmp = dest.with_name(dest.name + ".part")
         n = 0
-        with self.client.stream("GET", url, **kw) as r:
-            if r.status_code != 200:
-                raise ConnectorError(http_error_he(r.status_code), status=r.status_code)
-            with open(dest, "wb") as fh:
-                for chunk in r.iter_bytes():
-                    fh.write(chunk)
-                    n += len(chunk)
+        try:
+            with self.client.stream("GET", url, **kw) as r:
+                if r.status_code != 200:
+                    raise ConnectorError(http_error_he(r.status_code), status=r.status_code)
+                expected = r.headers.get("content-length")
+                with open(tmp, "wb") as fh:
+                    for chunk in r.iter_bytes():
+                        fh.write(chunk)
+                        n += len(chunk)
+            if expected and expected.isdigit() and int(expected) != n and not r.headers.get("content-encoding"):
+                raise ConnectorError(f"ההורדה נקטעה ({n} מתוך {expected} בתים)")
+            os.replace(tmp, dest)
+        except httpx.TransportError as exc:
+            raise ConnectorError(f"ההורדה נכשלה: {exc}", detail=str(exc)) from exc
+        finally:
+            if tmp.exists():
+                tmp.unlink()
         return n
 
     def close(self) -> None:

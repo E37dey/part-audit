@@ -144,7 +144,11 @@ class WindchillWrs(Connector):
                 if str(f.get("Format", "")).upper() == "STEP" or name.lower().endswith(STEP_EXT):
                     dest = self.step_cache_path(cad["ID"], cad.get("Version", ""), name or "model.stp")
                     if not dest.exists():
-                        h.download(f["URL"], dest)
+                        try:
+                            h.download(f["URL"], dest)
+                        except ConnectorError as exc:
+                            rec.step_note = f"הורדת קובץ ה-STEP נכשלה: {exc}"
+                            return
                     rec.step_path, rec.step_name = str(dest), name
                     return
         rec.step_note = "אין קובץ STEP בייצוג ברירת המחדל (ניתן להגדיר פרסום STEP ב-WVS)"

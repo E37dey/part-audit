@@ -67,3 +67,45 @@ def test_connector_reads_its_simulator(sid, sim_url, tmp_path):
         with_step = [r for r in parts if r.step_path]
         assert len(with_step) > 0.5 * len(parts)
         assert sum(1 for r in parts if r.pn) > 0.8 * len(parts) or sid == "archive"
+
+
+def test_a_redirect_cannot_turn_an_allowed_call_into_a_write():
+    """An allowed POST (a login) answered with a 307 to another path must not be followed to that path."""
+    from fastapi import FastAPI
+    from fastapi.responses import RedirectResponse
+    from part_audit.simulators import ServerThread
+    hits = []
+    app = FastAPI()
+
+    @app.post("/b1s/v1/Login")
+    def login():
+        return RedirectResponse("/b1s/v1/Items('A1')/Cancel", status_code=307)
+
+    @app.post("/b1s/v1/Items('A1')/Cancel")
+    def cancel():
+        hits.append(1)
+        return {"cancelled": True}
+
+    with ServerThread(app) as srv:
+        h = ReadOnlyHttp(srv.url + "/b1s/v1/", allowed=[("POST", r"/Login$")])
+        with pytest.raises(WriteBlocked):
+            h.request("POST", "Login", json={"UserName": "u", "Password": "p"})
+    assert hits == []
+
+
+def test_a_broken_download_leaves_no_file(tmp_path):
+    import httpx
+    from part_audit.connectors.http import ConnectorError
+
+    class Broken(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"ISO-10303-21;" * 100
+            raise httpx.ReadError("connection reset")
+
+    h = ReadOnlyHttp("http://127.0.0.1:9/")
+    h.client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(200, stream=Broken())),
+                            event_hooks=h.client.event_hooks)
+    dest = tmp_path / "part.step"
+    with pytest.raises(ConnectorError):
+        h.download("files/1/content", dest)
+    assert not dest.exists() and not list(tmp_path.iterdir())

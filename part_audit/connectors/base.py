@@ -24,6 +24,7 @@ class Field:
     help: str = ""
     options: list | None = None
     group: str = "connection"     # connection | mapping | advanced
+    secret: bool = False          # kept out of API answers (password fields always are)
 
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}

@@ -32,6 +32,7 @@ PLANT_TO_CHECK = {
     "bom_state_obsolete": "obsolete_in_use", "missing_in_erp": "released_not_in_erp",
     "erp_description_differs": "erp_description_mismatch", "erp_material_differs": "erp_material_mismatch",
     "erp_bom_qty_differs": "erp_bom_mismatch", "obsolete_but_active_in_erp": "erp_status_mismatch",
+    "missing_description": "missing_description",
 }
 
 
@@ -153,16 +154,22 @@ def main() -> None:
             return p.get("make_buy") != "buy"                      # the check covers manufactured parts
         if pl.startswith("stale_mass"):
             return bool(p.get("has_step") and p.get("material"))   # needs geometry and a material
+        if pl == "missing_description":
+            # the demo's SOLIDWORKS PDM keeps the description in the name variable: an empty one is not visible
+            return p.get("source_kind") != "swpdm_web"
         return True
     for pl, check in PLANT_TO_CHECK.items():
-        us = {u for u in planted_uids.get(pl, set()) if detectable(pl, u)}
+        all_planted = planted_uids.get(pl, set())
+        us = {u for u in all_planted if detectable(pl, u)}
         found = {u for u in us if u in issues.get(check, set())}
-        plant_rows[pl] = {"check": check, "planted": len(us), "found": len(found), "recall": ratio(len(found), len(us)),
+        # planted: everything planted; checkable: the part the check is designed to see (see detectable())
+        plant_rows[pl] = {"check": check, "planted": len(all_planted), "checkable": len(us), "found": len(found),
+                          "recall": ratio(len(found), len(us)),
                           "issues_of_this_type": len(issues.get(check, set())),
                           "on_unplanted_records": len(issues.get(check, set()) - set().union(
                               *[planted_uids.get(p2, set()) for p2, c2 in PLANT_TO_CHECK.items() if c2 == check]))}
     unit_err = [u for u, r in truth_of.items() if r["variant"] == "unit_error"]
-    plant_rows["unit_error (archive)"] = {"check": "unit_error", "planted": len(unit_err),
+    plant_rows["unit_error (archive)"] = {"check": "unit_error", "planted": len(unit_err), "checkable": len(unit_err),
                                           "found": sum(1 for u in unit_err if u in issues.get("unit_error", set())),
                                           "recall": ratio(sum(1 for u in unit_err if u in issues.get("unit_error", set())),
                                                           len(unit_err))}

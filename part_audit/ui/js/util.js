@@ -14,13 +14,13 @@ export const kg = (x) => (x == null ? "—" : (x < 0.01 ? (x * 1000).toFixed(1) 
 export const date = (s) => {
   if (!s) return "—";
   const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return s;
+  if (Number.isNaN(d.getTime())) return esc(s);
   return d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 export const datetime = (s) => {
   if (!s) return "—";
   const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? s : d.toLocaleString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? esc(s) : d.toLocaleString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
 // systems: short code + color for the small badges

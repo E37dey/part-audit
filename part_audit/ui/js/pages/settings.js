@@ -4,6 +4,7 @@ import { esc, datetime, DECISION } from "../util.js";
 import { toast } from "../ui.js";
 
 const TYPE_HE = { group: "קבוצת כפילות", pair: "זוג", mapping: "שורת מיפוי", issue: "ממצא" };
+const ISSUE = { approve: "לתקן", reject: "לא בעיה", review: "לבדיקה", ignore: "להתעלם" };
 
 export async function render({ el, setTitle, refreshStatus, state }) {
   setTitle("הגדרות");
@@ -14,8 +15,6 @@ export async function render({ el, setTitle, refreshStatus, state }) {
       <div class="form">
         <div class="field"><label for="user">השם שלך</label><input id="user" type="text" value="${esc(s.user_name)}" placeholder="למשל: יוסי כהן, מהנדס תקינה">
           <span class="help">יירשם ליד כל החלטה ובקובץ ה-Excel.</span></div>
-        <div class="field"><label for="cur">מטבע להצגה</label><select id="cur">${["ILS", "USD", "EUR"].map((c) => `<option ${c === s.currency ? "selected" : ""}>${c}</option>`).join("")}</select>
-          <span class="help">רק לתצוגה. המחירים עצמם נקראים מה-ERP כמו שהם.</span></div>
         <div class="field"><label for="mass">סבילות בבדיקת משקל (%)</label><input id="mass" type="number" min="1" max="100" step="1" value="${Math.round((s.mass_tolerance ?? 0.1) * 100)}" dir="ltr">
           <span class="help">משקל רשום שרחוק יותר מזה מהמשקל שמחושב מהמודל והחומר יסומן כבעיה.</span></div>
         <div class="field"><label for="workers">מספר תהליכים לניתוח גיאומטריה</label><input id="workers" type="number" min="1" max="64" value="${esc(s.workers)}" dir="ltr">
@@ -44,7 +43,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
       <div class="table-wrap" style="max-height:420px"><table class="t"><thead><tr><th>מתי</th><th>מי</th><th>על מה</th><th>מזהה</th><th>החלטה</th><th>הערה</th></tr></thead><tbody>
       ${decisions.length ? decisions.slice(0, 500).map((d) => `<tr><td class="nowrap">${datetime(d.created)}</td><td>${esc(d.user)}</td><td>${TYPE_HE[d.target_type] || esc(d.target_type)}</td>
         <td class="mono small">${d.target_type === "group" ? `<a href="#/group/${esc(d.target_id)}">${esc(d.target_id)}</a>` : d.target_type === "pair" ? `<a href="#/pair/${esc(d.target_id)}">${esc(d.target_id)}</a>` : esc(d.target_id)}</td>
-        <td>${(DECISION[d.decision] || [d.decision || "ממתין"])[0]}</td><td class="small">${esc(d.note || "")}</td></tr>`).join("")
+        <td>${d.target_type === "issue" ? (ISSUE[d.decision] || "ממתין") : (DECISION[d.decision] || [d.decision || "ממתין"])[0]}</td><td class="small">${esc(d.note || "")}</td></tr>`).join("")
         : '<tr><td colspan="6"><div class="empty">עדיין לא נרשמו החלטות</div></td></tr>'}
       </tbody></table></div></section>
 
@@ -64,7 +63,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
     if (Math.abs(near - 0.1) > 1e-9) thresholds.geo_near = near; else delete thresholds.geo_near;
     if (Math.abs(names - 0.9) > 1e-9) thresholds.name_similar = names; else delete thresholds.name_similar;
     try {
-      await send("PUT", "/api/settings", { user_name: el.querySelector("#user").value.trim(), currency: el.querySelector("#cur").value,
+      await send("PUT", "/api/settings", { user_name: el.querySelector("#user").value.trim(),
         mass_tolerance: num("#mass") / 100, workers: Math.max(1, Math.round(num("#workers"))),
         cost_per_pn_year: cost === "" ? null : Number(cost), thresholds });
       toast("ההגדרות נשמרו");

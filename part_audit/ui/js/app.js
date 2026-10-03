@@ -108,7 +108,7 @@ async function route() {
   }
 }
 
-const STAGES = [["collect", "איסוף נתונים מהמערכות המחוברות"], ["read", "קריאת קבצי STEP"], ["geometry", "טביעות אצבע גיאומטריות"],
+const STAGES = [["collect", "איסוף נתונים מהמערכות המחוברות"], ["read", "קריאת קבצי STEP"], ["geometry", "חישוב נפח, שטח ומידות של כל חלק"],
   ["compare", "השוואת חלקים: שמות, מק\"טים, גיאומטריה, מפרט"], ["impact", "השפעה: עצי מוצר, שימושים ומלאי"],
   ["quality", "בדיקות איכות נתונים ו-ERP"], ["done", "סיום"]];
 
@@ -144,7 +144,7 @@ export async function startScan() {
         go("#/dashboard");
         route();
       } else {
-        m.el.querySelector("#scan-detail").innerHTML = `<div class="callout warn">${j.status === "cancelled" ? "הסריקה נעצרה." : "הסריקה נכשלה: " + esc(j.error || "")}</div>`;
+        m.el.querySelector("#scan-detail").innerHTML = `<div class="callout warn">${j.status === "cancelled" ? "הסריקה נעצרה. התוצאות של הסריקה הקודמת נשארו כמו שהן." : "הסריקה נכשלה: " + esc(j.error || "")}</div>`;
       }
       return;
     }

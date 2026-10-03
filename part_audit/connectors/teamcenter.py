@@ -185,8 +185,12 @@ class TeamcenterRest(Connector):
                     if t:
                         dest = self.step_cache_path(f, rec.revision, name)
                         if not dest.exists():
-                            h.download(f"{fms}{quote(name)}", dest, params={"ticket": t})
-                        rec.step_path, rec.step_name = str(dest), name
+                            try:
+                                h.download(f"{fms}{quote(name)}", dest, params={"ticket": t})
+                            except ConnectorError as exc:
+                                rec.step_note = f"הורדת קובץ ה-STEP נכשלה: {exc}"
+                        if dest.exists():
+                            rec.step_path, rec.step_name = str(dest), name
                 elif not is_asm:
                     rec.step_note = "אין Dataset של STEP ל-Item Revision הזה"
                 if is_asm:

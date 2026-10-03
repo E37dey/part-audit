@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ap_app = sub.add_parser("app", help="start the local web app (Hebrew UI) on 127.0.0.1")
     ap_app.add_argument("--port", type=int, default=8765)
-    ap_app.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 unless you know you need otherwise")
+    ap_app.add_argument("--host", default="127.0.0.1", help="loopback only (127.0.0.1, localhost, ::1)")
     ap_app.add_argument("--workspace", default=str(Path.home() / "PartAudit"),
                         help="folder for the app database, caches, results and exports")
     ap_app.add_argument("--no-demo", action="store_true", help="do not offer the demo environment")
@@ -94,11 +94,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _running_here(url: str) -> bool:
-    """True if a PartAudit app already answers on this address."""
+    """True if a PartAudit app already answers on this address (asked directly, never through a proxy)."""
     import json
     import urllib.request
     try:
-        with urllib.request.urlopen(url + "/api/status", timeout=1.5) as r:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url + "/api/status", timeout=1.5) as r:
             return "demo_available" in json.loads(r.read().decode("utf-8"))
     except Exception:
         return False
@@ -106,7 +107,7 @@ def _running_here(url: str) -> bool:
 
 def _port_free(host: str, port: int) -> bool:
     import socket
-    with socket.socket() as s:
+    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET) as s:
         try:
             s.bind((host, port))
             return True
@@ -121,23 +122,26 @@ def run_app(args) -> int:
     import uvicorn
 
     from .server.app import create_app
-    host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+    host = args.host if args.host in ("127.0.0.1", "localhost", "::1") else "127.0.0.1"
+    if host != args.host:
+        print(f"PartAudit only listens on this computer: {args.host!r} ignored, using 127.0.0.1")
+    name = f"[{host}]" if ":" in host else host
     port = args.port
-    if _running_here(f"http://{host}:{port}"):
-        print(f"PartAudit already runs at http://{host}:{port} - opening it")
+    if _running_here(f"http://{name}:{port}"):
+        print(f"PartAudit already runs at http://{name}:{port} - opening it")
         if not args.no_browser:
-            webbrowser.open(f"http://{host}:{port}")
+            webbrowser.open(f"http://{name}:{port}")
         return 0
     for p in range(args.port, args.port + 30):
-        if _port_free(args.host, p):
+        if _port_free(host, p):
             port = p
             break
-    url = f"http://{host}:{port}"
+    url = f"http://{name}:{port}"
     app = create_app(args.workspace, demo=not args.no_demo, base_url=url)
     print(f"PartAudit is running: {url}  (workspace: {args.workspace})  - close this window to stop")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=args.host, port=port, log_level="warning")
+    uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 
 

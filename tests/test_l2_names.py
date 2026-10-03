@@ -7,15 +7,29 @@ from part_audit.names import (blocking_pairs, compare_names, extract_part_number
 
 @pytest.mark.parametrize("raw,key", [
     ("PA-10234", "PA10234"), ("pa10234", "PA10234"), ("PA_010234", "PA10234"), ("pa.10234", "PA10234"),
-    ("100-2345-01", "10023451"), ("100-02345-1", "10023451"),
+    ("100-2345-01", "100.2345.1"), ("100-02345-1", "100.2345.1"), ("0000053716", "53716"),
 ])
 def test_pn_key(raw, key):
     assert pn_key(raw) == key
 
 
+def test_pn_key_does_not_merge_different_numbers():
+    assert pn_key("100-0001") != pn_key("1001")          # zeros inside a number are part of it
+    assert pn_key("א-100") != pn_key("ב-100")            # Hebrew letters are part of the part number
+    assert pn_key("A-100") != pn_key("B-100")
+
+
 def test_pn_core():
     assert pn_core("PA-010234") == "10234"
     assert pn_core("XB-10234") == pn_core("10234")
+    assert pn_core("900-5961") == pn_core("9005961")
+    assert pn_core("100-0001") != pn_core("1001")
+
+
+def test_pn_letters_compatible():
+    from part_audit.names import pn_letters_compatible
+    assert pn_letters_compatible("N-STD-0412", "STD-0412") and pn_letters_compatible("900-5961", "9005961")
+    assert not pn_letters_compatible("א-1234", "ב-1234")
 
 
 def test_extract_part_numbers():

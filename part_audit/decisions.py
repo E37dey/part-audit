@@ -54,3 +54,30 @@ def master_pn(res_index: dict, group: dict, decision: dict | None) -> str:
     if uid and uid in group["members"] and res_index.get(uid, {}).get("pn"):
         return res_index[uid]["pn"]
     return group["master_pn"]
+
+
+def group_impact(group: dict, target_pn: str) -> dict:
+    """What merging the group into target_pn changes: part numbers dropped, stock held on them (only ERP rows in
+    the group's main currency are added up; no conversion), BOM lines that point at a dropped part number."""
+    key = pn_key(target_pn or "")
+    dropped = [e for e in group["erp"] if pn_key(e["pn"]) != key]
+    currencies = [e.get("currency") for e in group["erp"] if e.get("currency")]
+    main = max(set(currencies), key=currencies.count) if currencies else None
+    value = sum(e["value"] or 0 for e in dropped if not main or not e.get("currency") or e.get("currency") == main)
+    return {"redundant_pns": max(0, len(group["pns"]) - 1), "redundant_stock_value": round(value, 2),
+            "bom_lines_to_update": sum(1 for u in group["where_used"] if key and u["via"] and pn_key(u["via"]) != key),
+            "currency": main}
+
+
+def row_decision(row: dict, decisions: dict) -> dict:
+    """Decision that applies to one mapping row: its own, or its group's, whichever was made last (a later group
+    rejection cancels earlier row approvals; a later row decision is an exception to the group's)."""
+    own = decisions.get(f"mapping:{row['id']}")
+    grp = decisions.get(f"group:{row['group_id']}")
+    pick, inherited = own, False
+    if grp and (not own or (grp.get("created") or "") > (own.get("created") or "")):
+        pick, inherited = grp, True
+    if not pick:
+        return {"decision": "", "decision_by": "", "decision_at": "", "decision_note": "", "inherited": False}
+    return {"decision": pick["decision"], "decision_by": pick.get("user", ""), "decision_at": pick.get("created", ""),
+            "decision_note": pick.get("note", ""), "inherited": inherited}

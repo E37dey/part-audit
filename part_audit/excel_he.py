@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from .decisions import effective_mapping
+from .decisions import effective_mapping, group_impact, row_decision
 from .explain import CATEGORY_HE
 
 HEAD = PatternFill("solid", fgColor="1E3A8A")
@@ -25,6 +25,15 @@ BORDER = Border(top=THIN, bottom=THIN, left=THIN, right=THIN)
 WRAP = Alignment(wrap_text=True, vertical="top", horizontal="right", readingOrder=2)
 RIGHT = Alignment(vertical="top", horizontal="right", readingOrder=2)
 DECISION_HE = {"approve": "מאושר", "reject": "נדחה", "review": "לבדיקה", "ignore": "התעלם", "": "ממתין"}
+# the words on the buttons the engineer pressed (same as in the app)
+ISSUE_DECISION_HE = {"approve": "לתקן", "reject": "לא בעיה", "review": "לבדיקה", "ignore": "להתעלם"}
+PAIR_DECISION_HE = {
+    "near_identical": {"approve": "לתקנן לחלק אחד", "reject": "חלקים שונים – להשאיר", "review": "לבדיקה"},
+    "identical_attr_conflict": {"approve": "טעות רישום – לתקן", "reject": "חלקים שונים באמת", "review": "לבדיקה"},
+    "mirror": {"approve": "תקין – ימין ושמאל", "reject": "יש טעות בסימון", "review": "לבדיקה"},
+    "conflict": {"approve": "לתקן את המק\"ט", "reject": "תקין", "review": "לבדיקה"},
+    "conflict_unverified": {"approve": "לתקן את המק\"ט", "reject": "תקין", "review": "לבדיקה"},
+}
 SEVERITY_HE = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה", "info": "מידע"}
 STATE_HE = {"released": "משוחרר", "in_work": "בעבודה", "review": "בבדיקה", "obsolete": "מבוטל", "": "—"}
 
@@ -46,6 +55,8 @@ def _sheet(wb: Workbook, title: str, headers: list[tuple[str, int]], rows: list[
     for i, row in enumerate(rows):
         for c, v in enumerate(row, start=1):
             cell = ws.cell(r0 + 1 + i, c, v)
+            if isinstance(v, str) and v.startswith("="):
+                cell.data_type = "s"   # names come from other systems: never let one become a formula
             cell.font, cell.alignment, cell.border = BODY_FONT, WRAP, BORDER
             if i % 2 == 1:
                 cell.fill = BAND
@@ -61,8 +72,17 @@ def _sheet(wb: Workbook, title: str, headers: list[tuple[str, int]], rows: list[
 
 def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = False, user: str = "") -> Path:
     parts = {p["uid"]: p for p in res["parts"]}
-    s = res["summary"]
+    s = dict(res["summary"])
     cur = s.get("currency", "ILS")
+    # money and BOM lines follow the target the engineer chose (where one was chosen)
+    impacts = []
+    for g in res["groups"]:
+        chosen = (decisions.get(f"group:{g['id']}") or {}).get("master_uid") or ""
+        target = chosen if chosen in g["members"] and parts[chosen]["pn"] else g["master_uid"]
+        impacts.append((g, group_impact(g, parts[target]["pn"])))
+    s["redundant_stock_value"] = round(sum(i["redundant_stock_value"] for g, i in impacts
+                                           if (g.get("currency") or cur) == cur), 2)
+    s["bom_lines_to_update"] = sum(i["bom_lines_to_update"] for _, i in impacts)
     wb = Workbook()
 
     # ---------------------------------------------------------------- summary
@@ -141,19 +161,16 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
             (d.get("created") or "")[:16].replace("T", " "), d.get("note", "")
     rows = []
     for m in effective_mapping(res, decisions):
-        dm, du, dd, dn = dec("mapping", m["id"])
-        if not dm or dm == "ממתין":
-            dg = dec("group", m["group_id"])
-            if dg[0] in ("מאושר", "נדחה"):
-                dm, du, dd, dn = dg
+        d = row_decision(m, decisions)          # the row's own decision or its group's, whichever was made last
         rows.append([m["group_id"], m["old_pn"], m["old_name"], m["old_source"], m["new_pn"], m["new_name"],
                      m["reason_he"], m["why_target_he"], m["confidence"], m["where_used"], m["erp_stock"],
-                     dm or "ממתין", du, dd, dn])
+                     DECISION_HE.get(d["decision"], d["decision"]) or "ממתין", d["decision_by"],
+                     (d["decision_at"] or "")[:16].replace("T", " "), d["decision_note"]])
     ws = _sheet(wb, "מיפוי מק\"טים", [("קבוצה", 11), ("מק\"ט קיים", 15), ("שם קיים", 32), ("מערכת", 22),
                                       ("מק\"ט יעד", 15), ("שם יעד", 32), ("סיבה", 50), ("למה המק\"ט הזה", 34),
                                       ("ביטחון", 9), ("שימושים", 9), ("מלאי", 9), ("החלטה", 11), ("מאשר", 12),
                                       ("תאריך", 15), ("הערה", 30)], rows,
-                note="הצעות בלבד – שום דבר לא נכתב למערכות. ההחלטות מהאפליקציה מולאו; ניתן לעדכן בתאים הצהובים.")
+                note="הצעות בלבד – שום דבר לא נכתב למערכות. רק שורות 'מאושר' הן לביצוע. ההחלטות מהאפליקציה מולאו; ניתן לעדכן בתאים הצהובים.")
     dv = DataValidation(type="list", formula1='"ממתין,מאושר,נדחה,לבדיקה"', allow_blank=True)
     ws.add_data_validation(dv)
     for i in range(len(rows)):
@@ -174,6 +191,7 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
         chosen = (decisions.get(f"group:{g['id']}") or {}).get("master_uid") or ""
         target = chosen if chosen in g["members"] and parts[chosen]["pn"] else g["master_uid"]
         erp_by_pn = {e["pn"]: e for e in g["erp"]}
+        impact = group_impact(g, parts[target]["pn"])
         for u in g["members"]:
             p = parts[u]
             e = erp_by_pn.get(p["pn"]) or {}
@@ -181,7 +199,7 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
                          ("כן" if u == target else "") + (" (נבחר)" if u == target and target != g["master_uid"] else ""),
                          p["pn"], p["name"], p["source"],
                          STATE_HE.get(p["state_class"], p["state"]), p["revision"], p["material"], p["used_in"],
-                         e.get("stock"), e.get("unit_cost"), e.get("value"), g["redundant_stock_value"],
+                         e.get("stock"), e.get("unit_cost"), e.get("value"), impact["redundant_stock_value"],
                          g["reason_he"], dg[0] or "ממתין", dg[3]])
     _sheet(wb, "קבוצות כפילות", [("קבוצה", 11), ("סוג", 13), ("מפרט", 16), ("מק\"ט יעד?", 10), ("מק\"ט", 15),
                                  ("שם", 34), ("מערכת", 22), ("מצב", 10), ("רוויזיה", 8), ("חומר", 18),
@@ -196,44 +214,50 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
                 continue
             a, b = parts[p["a"]], parts[p["b"]]
             m = p.get("metrics") or {}
-            d = dec("pair", p["id"])
+            d = decisions.get(f"pair:{p['id']}") or {}
+            label = PAIR_DECISION_HE.get(p["category"], {}).get(d.get("decision", ""), DECISION_HE.get(d.get("decision", ""), ""))
             out.append([CATEGORY_HE.get(p["category"], p["category"]), a["pn"], a["name"], a["source"], b["pn"],
                         b["name"], b["source"], None if m.get("d_volume") is None else round(100 * m["d_volume"], 3),
-                        None if m.get("p95_mm") is None else round(m["p95_mm"], 3), p["confidence"], p["reason_he"],
-                        p["hint_he"], d[0] or "ממתין", d[3]])
+                        None if m.get("d_area") is None else round(100 * m["d_area"], 3), p["confidence"], p["reason_he"],
+                        p["hint_he"], label or "ממתין", d.get("user", ""), d.get("note", "")])
         return out
     hdr = [("סוג", 18), ("מק\"ט א'", 15), ("שם א'", 30), ("מערכת א'", 20), ("מק\"ט ב'", 15), ("שם ב'", 30),
-           ("מערכת ב'", 20), ("הפרש נפח %", 10), ("סטייה 95% (מ\"מ)", 11), ("ביטחון", 8), ("הסבר", 60),
-           ("המלצה", 30), ("החלטה", 10), ("הערה", 24)]
+           ("מערכת ב'", 20), ("הפרש נפח %", 10), ("הפרש שטח פנים %", 11), ("ביטחון", 8), ("הסבר", 60),
+           ("המלצה", 30), ("החלטה", 16), ("מאשר", 12), ("הערה", 24)]
     _sheet(wb, "כמעט זהים", hdr, pair_rows({"near_identical"}))
     _sheet(wb, "מראה ומפרט שונה", hdr, pair_rows({"mirror", "identical_attr_conflict", "conflict",
                                                     "conflict_unverified"}))
 
     # ---------------------------------------------------------------- names / quality / ERP
+    def issue_dec(iid):
+        d = decisions.get(f"issue:{iid}") or {}
+        return [ISSUE_DECISION_HE.get(d.get("decision", ""), "") or "ממתין", d.get("user", ""), d.get("note", "")]
+
     rows = []
     for n in res["names"]:
         ps = [parts[u] for u in n["uids"] if u in parts]
         rows.append([n["type_he"], n.get("pn", ""), " | ".join(n.get("names") or []),
                      " | ".join(f"{p['pn']} ({p['source']})" for p in ps), n.get("message", ""),
-                     None if n.get("similarity") is None else round(n["similarity"], 2)])
+                     None if n.get("similarity") is None else round(n["similarity"], 2), *issue_dec(n["id"])])
     _sheet(wb, "שמות ומק\"טים", [("סוג", 26), ("מק\"ט", 15), ("שמות", 60), ("רשומות", 50), ("פירוט", 50),
-                                ("דמיון", 8)], rows)
+                                ("דמיון", 8), ("טיפול", 11), ("מי", 12), ("הערה", 24)], rows)
     rows = []
     for q in sorted(res["quality"], key=lambda q: ("high", "medium", "low", "info").index(q["severity"])):
         if q["severity"] == "info":
             continue
         p = parts.get(q["uids"][0]) if q["uids"] else None
         rows.append([q["severity_he"], q["type_he"], p["pn"] if p else "", p["name"] if p else "",
-                     p["source"] if p else "", q["message"]])
+                     p["source"] if p else "", q["message"], *issue_dec(q["id"])])
     _sheet(wb, "איכות נתונים", [("חומרה", 10), ("בדיקה", 30), ("מק\"ט", 15), ("שם", 34), ("מערכת", 22),
-                                ("פירוט", 70)], rows)
+                                ("פירוט", 70), ("טיפול", 11), ("מי", 12), ("הערה", 24)], rows)
     rows = []
     for q in sorted(res["erp_issues"], key=lambda q: ("high", "medium", "low", "info").index(q["severity"])):
         p = parts.get(q["uids"][0]) if q["uids"] else None
         rows.append([q["severity_he"], q["type_he"], (p["pn"] if p else q["details"].get("pn", "")),
-                     (p["name"] if p else q["details"].get("description", "")), p["source"] if p else "ERP", q["message"]])
+                     (p["name"] if p else q["details"].get("description", "")), p["source"] if p else "ERP", q["message"],
+                     *issue_dec(q["id"])])
     _sheet(wb, "ERP מול PDM", [("חומרה", 10), ("בדיקה", 30), ("מק\"ט", 15), ("שם", 34), ("מערכת", 22),
-                               ("פירוט", 70)], rows)
+                               ("פירוט", 70), ("טיפול", 11), ("מי", 12), ("הערה", 24)], rows)
 
     # ---------------------------------------------------------------- all parts
     rows = []

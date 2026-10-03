@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import traceback
@@ -16,11 +17,19 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__, connectors
 from ..demo import DEMO_DIR, demo_sources
 
-from ..decisions import effective_mapping
+from ..decisions import effective_mapping, group_impact, row_decision
 from ..project import ProjectSettings, audit_snapshot, collect
 from .store import Store
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1", "testserver")   # testserver: FastAPI's TestClient
+
+
+def _host_name(host_header: str) -> str:
+    h = host_header.strip().lower()
+    if h.startswith("["):                       # [::1]:8765
+        return h[1:h.find("]")] if "]" in h else h
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
 DEFAULT_SETTINGS = {"user_name": "", "mass_tolerance": 0.10, "workers": max(1, (os.cpu_count() or 2) - 1),
                     "cost_per_pn_year": None, "currency": "ILS", "thresholds": {}}
 
@@ -90,7 +99,25 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     store = Store(workspace)
     jobs = Jobs()
     results: dict[str, dict] = {}
-    app = FastAPI(title="PartAudit", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json")
+    # no interactive API docs: they would load scripts from a CDN
+    app = FastAPI(title="PartAudit", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def local_only(request: Request, call_next):
+        """Only this computer's browser may use the app: the Host header must be a loopback name (blocks DNS
+        rebinding), and a request that changes something must not come from another web site's page."""
+        host = request.headers.get("host", "")
+        if _host_name(host) not in LOOPBACK_NAMES:
+            return JSONResponse({"error": "גישה מותרת רק מהמחשב הזה (127.0.0.1)"}, status_code=403)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            if origin is not None and origin != f"http://{host}" and origin != f"https://{host}":
+                return JSONResponse({"error": "בקשה מאתר אחר נחסמה"}, status_code=403)
+            if request.url.path.startswith("/api/"):
+                ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
+                if ctype not in ("", "application/json", "multipart/form-data"):
+                    return JSONResponse({"error": "סוג בקשה לא נתמך"}, status_code=415)
+        return await call_next(request)
     app.state.store, app.state.jobs, app.state.base_url = store, jobs, base_url
     factory_dir = Path(factory_dir) if factory_dir else None
     demo_available = bool(demo and factory_dir and (factory_dir / "factory.json").exists())
@@ -103,23 +130,30 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     meshes = MeshCache(store.ws / "cache" / "meshes")
     compare_cache: dict[tuple, bytes] = {}
     align_cache: dict[tuple, dict] = {}
+    cache_lock = threading.Lock()
 
     # ------------------------------------------------------------------ helpers
     def settings() -> dict:
         return {**DEFAULT_SETTINGS, **store.get_settings()}
 
+    results_lock = threading.Lock()
+
     def load_result(rid: str | None) -> tuple[str, dict]:
         rid = rid if rid and rid != "latest" else store.latest_run()
         if not rid:
             raise HTTPException(404, "עדיין לא בוצעה סריקה")
-        if rid not in results:
-            f = store.run_dir(rid) / "result.json"
-            if not f.exists():
-                raise HTTPException(404, "תוצאות הסריקה לא נמצאו")
-            results.clear()  # keep one run in memory
-            results[rid] = json.loads(f.read_text(encoding="utf-8"))
-            results[rid]["_index"] = {p["uid"]: p for p in results[rid]["parts"]}
-        return rid, results[rid]
+        with results_lock:
+            res = results.get(rid)
+            if res is None:
+                f = store.run_dir(rid) / "result.json"
+                if not f.exists():
+                    raise HTTPException(404, "תוצאות הסריקה לא נמצאו")
+                res = json.loads(f.read_text(encoding="utf-8"))
+                res["_index"] = {p["uid"]: p for p in res["parts"]}
+                res["_groups"] = {g["id"]: g for g in res["groups"]}
+                results.clear()  # keep one run in memory
+                results[rid] = res
+        return rid, res
 
     def with_decisions(rows: list[dict], kind: str, idx: dict | None = None) -> list[dict]:
         dec = store.current_decisions()
@@ -130,10 +164,17 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                    "decision_at": d["created"] if d else "", "decision_note": d["note"] if d else "",
                    "decision_master": d["master_uid"] if d else ""}
             if kind == "group" and idx is not None:  # the part number that stays, after the engineer's choice
+                g = groups_by_id().get(r["id"])
                 mu = row["decision_master"]
-                row["final_master_pn"] = idx[mu]["pn"] if mu and mu in idx and idx[mu]["pn"] else r.get("master_pn")
+                final = idx[mu]["pn"] if g and mu in g["members"] and idx[mu]["pn"] else r.get("master_pn")
+                row["final_master_pn"] = final
+                if g and final != g["master_pn"]:
+                    row.update({k: v for k, v in group_impact(g, final).items() if k != "currency"})
             out.append(row)
         return out
+
+    def groups_by_id() -> dict:
+        return load_result("latest")[1]["_groups"]
 
     def step_path(rid: str, uid: str) -> str:
         snap = store.run_dir(rid) / "step_paths.json"
@@ -214,7 +255,9 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
 
     @app.post("/api/upload")
     async def upload(file: UploadFile = File(...)):
-        name = Path(file.filename or "upload").name
+        raw = Path(file.filename or "upload").name
+        stem, suffix = Path(raw).stem, Path(raw).suffix.lower()
+        name = (re.sub(r"[^\w.\- ]+", "_", stem, flags=re.UNICODE).strip() or "upload")[:60] + suffix
         if Path(name).suffix.lower() not in (".xlsx", ".xlsm", ".csv", ".txt"):
             raise HTTPException(400, "ניתן להעלות קבצי Excel (.xlsx) או CSV בלבד")
         dest = store.ws / "uploads" / f"{time.strftime('%Y%m%d-%H%M%S')}_{name}"
@@ -246,6 +289,9 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 if not srcs:
                     raise RuntimeError("אין מקורות נתונים פעילים")
                 snap = collect(srcs, store.ws / "cache" / "connectors", progress=progress, should_stop=should_stop)
+                if should_stop():   # a stopped scan is incomplete: it must never become the latest result
+                    store.finish_run(rid, "cancelled", None, time.time() - t0)
+                    return None
                 snap.save(store.run_dir(rid) / "snapshot.json")
                 (store.run_dir(rid) / "step_paths.json").write_text(json.dumps(
                     {r.uid: r.step_path for r in snap.records if r.step_path}), encoding="utf-8")
@@ -253,11 +299,15 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                                                 "cost_per_pn_year": cfg["cost_per_pn_year"],
                                                 "currency": cfg["currency"], "thresholds": cfg.get("thresholds") or {}})
                 res = audit_snapshot(snap, st, store.ws / "cache", progress=progress)
+                if should_stop():
+                    store.finish_run(rid, "cancelled", None, time.time() - t0)
+                    return None
                 res["run_id"] = rid
                 res["demo"] = any(s.get("simulated") for s in srcs)
                 (store.run_dir(rid) / "result.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
                 store.finish_run(rid, "done", res["summary"], time.time() - t0)
-                results.clear()
+                with results_lock:
+                    results.clear()
                 return {"run_id": rid, "summary": res["summary"]}
             except Exception as exc:
                 store.finish_run(rid, "error", None, time.time() - t0, f"{type(exc).__name__}: {exc}")
@@ -308,12 +358,17 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 for j in range(i + 1, len(srcs)):
                     k = f"{srcs[i]}|{srcs[j]}"
                     cross[k] = cross.get(k, 0) + 1
-        top = sorted(res["groups"], key=lambda g: (-(g["redundant_stock_value"] or 0), -len(g["members"])))[:10]
-        return {"run_id": rid, "created": res["created"], "demo": res.get("demo", False), "summary": res["summary"],
+        summ = dict(res["summary"])
+        final = with_decisions(res["groups"], "group", idx)
+        summ["redundant_stock_value"] = round(sum(g["redundant_stock_value"] for g in final
+                                                  if g.get("currency", summ["currency"]) == summ["currency"]), 2)
+        summ["bom_lines_to_update"] = sum(g["bom_lines_to_update"] for g in final)
+        top = sorted(final, key=lambda g: (-(g["redundant_stock_value"] or 0), -len(g["members"])))[:10]
+        return {"run_id": rid, "created": res["created"], "demo": res.get("demo", False), "summary": summ,
                 "timings": res["timings"], "sources": res["sources"], "decisions": {"pending_groups": pending,
                                                                                      "approved_groups": approved},
                 "issues_by_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])), "by_source": by_source,
-                "cross_source": cross, "top_groups": with_decisions(top, "group", idx)}
+                "cross_source": cross, "top_groups": top}
 
     @app.get("/api/runs/{rid}/groups")
     def groups(rid: str):
@@ -321,9 +376,10 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         idx = res["_index"]
         rows = []
         for g in res["groups"]:
-            rows.append({k: g[k] for k in ("id", "category", "pns", "sources", "cross_source", "master_uid", "master_pn",
-                                           "confidence", "spec", "name", "redundant_pns", "redundant_stock_value",
-                                           "stock_value", "bom_lines_to_update")}
+            rows.append({k: g.get(k) for k in ("id", "category", "pns", "sources", "cross_source", "master_uid",
+                                               "master_pn", "confidence", "spec", "name", "redundant_pns",
+                                               "redundant_stock_value", "stock_value", "bom_lines_to_update",
+                                               "currency")}
                         | {"n_members": len(g["members"]), "n_used": len(g["where_used"]),
                            "family": idx[g["master_uid"]]["make_buy"]})
         return with_decisions(rows, "group", idx)
@@ -385,14 +441,8 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     def mapping(rid: str):
         rid, res = load_result(rid)
         dec = store.current_decisions()
-        rows = with_decisions(effective_mapping(res, dec), "mapping")
-        for r in rows:  # a decision on the whole group applies to its rows unless the row has its own
-            if not r["decision"]:
-                d = dec.get(f"group:{r['group_id']}")
-                if d:
-                    r["decision"], r["decision_by"], r["decision_at"] = d["decision"], d["user"], d["created"]
-                    r["decision_note"], r["inherited"] = d["note"], True
-        return rows
+        # the row's own decision or its group's, whichever was made last
+        return [{**r, **row_decision(r, dec)} for r in effective_mapping(res, dec)]
 
     @app.get("/api/runs/{rid}/parts")
     def parts_list(rid: str, q: str = "", source: str = "", kind: str = "", flag: str = "", limit: int = 200,
@@ -489,10 +539,12 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 raise
             except Exception as exc:
                 raise HTTPException(500, f"היישור נכשל: {exc}")
-            if len(align_cache) > 512:
-                align_cache.clear()
-            align_cache[key] = {"matrix": al["matrix"], "mirror": al["mirror"], "scale": scale}
-        return align_cache[key]
+            with cache_lock:
+                if len(align_cache) > 512:
+                    align_cache.clear()
+                align_cache[key] = {"matrix": al["matrix"], "mirror": al["mirror"], "scale": scale}
+                return align_cache[key]
+        return align_cache.get(key) or align(rid, a, b)
 
     @app.get("/api/compare/{rid}")
     def compare(rid: str, a: str, b: str, mirror: bool = False):
@@ -507,10 +559,14 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 raise
             except Exception as exc:
                 raise HTTPException(500, f"ההשוואה נכשלה: {exc}")
-            if len(compare_cache) > 24:
-                compare_cache.clear()
-            compare_cache[key] = compare_bytes(c)
-        return Response(compare_cache[key], media_type="application/octet-stream")
+            data = compare_bytes(c)
+            with cache_lock:
+                if len(compare_cache) > 24:
+                    compare_cache.clear()
+                compare_cache[key] = data
+            return Response(data, media_type="application/octet-stream")
+        data = compare_cache.get(key)
+        return Response(data, media_type="application/octet-stream") if data is not None else compare(rid, a, b, mirror)
 
     # ------------------------------------------------------------------ decisions + export
     @app.post("/api/decisions")
@@ -521,16 +577,27 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         if body.get("decision") not in ("approve", "reject", "review", "ignore", ""):
             raise HTTPException(400, "החלטה לא מוכרת")
         user = (body.get("user") or settings().get("user_name") or "").strip() or "משתמש"
-        ids = body.get("target_ids") or [body.get("target_id")]
-        if body.get("master_uid"):
-            if body["target_type"] != "group" or len(ids) != 1:
-                raise HTTPException(400, "מק\"ט יעד אפשר לבחור רק לקבוצה אחת")
+        ids = [t for t in (body.get("target_ids") or [body.get("target_id")]) if t]
+        if body.get("master_uid") and (body["target_type"] != "group" or len(ids) != 1):
+            raise HTTPException(400, "מק\"ט יעד אפשר לבחור רק לקבוצה אחת")
+        masters = {}
+        if body["target_type"] == "group":
+            # every group decision records the target it is about: the one chosen now, else the one chosen before,
+            # else the current proposal - so a bulk approval or a rescan never changes what was approved
             _, res = load_result("latest")
-            g = next((x for x in res["groups"] if x["id"] == ids[0]), None)
-            if not g or body["master_uid"] not in g["members"] or not res["_index"][body["master_uid"]]["pn"]:
-                raise HTTPException(400, "מק\"ט היעד חייב להיות אחת הרשומות בקבוצה, עם מק\"ט")
+            groups, idx, dec = groups_by_id(), res["_index"], store.current_decisions()
+            for tid in ids:
+                g = groups.get(tid)
+                if not g:
+                    raise HTTPException(404, "הקבוצה לא נמצאה")
+                mu = body.get("master_uid") or (dec.get(f"group:{tid}") or {}).get("master_uid") or g["master_uid"]
+                if mu not in g["members"] or not idx[mu]["pn"]:
+                    if body.get("master_uid"):
+                        raise HTTPException(400, "מק\"ט היעד חייב להיות אחת הרשומות בקבוצה, עם מק\"ט")
+                    mu = g["master_uid"]
+                masters[tid] = mu
         out = [store.add_decision(body["target_type"], tid, body["decision"], body.get("note", ""), user,
-                                  body.get("master_uid", ""), store.latest_run() or "") for tid in ids if tid]
+                                  masters.get(tid, ""), store.latest_run() or "") for tid in ids]
         return {"ok": True, "saved": len(out)}
 
     @app.get("/api/decisions")

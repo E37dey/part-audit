@@ -226,18 +226,46 @@ for _k in _ambiguous_keys:
 # --------------------------------------------------------------------------- part numbers
 
 
+_PN_TOKENS = re.compile(r"[A-Z\u05D0-\u05EA]+|\d+")
+
+
+def _pn_tokens(pn: str) -> list[str]:
+    return _PN_TOKENS.findall(unicodedata.normalize("NFKC", pn or "").upper())
+
+
 def pn_key(pn: str) -> str:
-    """Normalized part number: uppercase, separators removed, leading zeros stripped per digit group."""
-    s = unicodedata.normalize("NFKC", pn).upper().strip()
-    s = re.sub(r"[\s._/\\-]+", "-", s)
-    parts = re.findall(r"[A-Z]+|\d+", s)
-    return "".join(p.lstrip("0") or "0" if p.isdigit() else p for p in parts)
+    """Normalized part number. Case and separators are ignored and leading zeros are dropped in every number,
+    but letters (Latin and Hebrew) are kept and the border between two numbers is kept:
+    'PA_010234' = 'PA-10234', '100-2345-01' = '100-02345-1' (-> '100.2345.1'), while 'א-100' != 'ב-100' and
+    '100-0001' != '1001'. A part number written with and without a dash between numbers ('900-5961' / '9005961')
+    is matched through pn_core."""
+    out, after_digits = [], False
+    for t in _pn_tokens(pn):
+        if t.isdigit():
+            out.append(("." if after_digits else "") + (t.lstrip("0") or "0"))
+            after_digits = True
+        else:
+            out.append(t)
+            after_digits = False
+    return "".join(out)
+
+
+def pn_letters(pn: str) -> str:
+    """The letters of a part number ('N-STD-0412' -> 'NSTD'), to tell a dropped prefix from a different one."""
+    return "".join(t for t in _pn_tokens(pn) if not t.isdigit())
+
+
+def pn_letters_compatible(a: str, b: str) -> bool:
+    """True when the letters of two part numbers can be the same series written differently: no letters on one
+    side, or one side's letters inside the other's ('STD' / 'NSTD'). 'א' and 'ב' are different series."""
+    la, lb = pn_letters(a), pn_letters(b)
+    return not la or not lb or la in lb or lb in la
 
 
 def pn_core(pn: str) -> str:
-    """Digits-only core of a part number (leading zeros stripped per group)."""
-    groups = re.findall(r"\d+", pn)
-    return "".join(g.lstrip("0") or "0" for g in groups)
+    """Digits of a part number as written, without leading zeros: '900-5961' = '9005961', 'N-STD-0412' -> '412',
+    '100-0001' -> '1000001' (not '1001')."""
+    return "".join(t for t in _pn_tokens(pn) if t.isdigit()).lstrip("0") or ""
 
 
 def extract_part_numbers(text: str) -> list[str]:

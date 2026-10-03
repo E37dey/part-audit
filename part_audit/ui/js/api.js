@@ -25,15 +25,39 @@ async function pnOf(uid) {
   return (await staticCache.pnMap)[uid] || "";
 }
 
+// same rules as the app: pn keys keep letters and number borders; impact follows the chosen target
+function pnKey(pn) {
+  const toks = String(pn || "").normalize("NFKC").toUpperCase().match(/[A-Z\u05D0-\u05EA]+|\d+/g) || [];
+  let out = "", afterDigits = false;
+  for (const t of toks) {
+    if (/^\d+$/.test(t)) { out += (afterDigits ? "." : "") + (t.replace(/^0+/, "") || "0"); afterDigits = true; }
+    else { out += t; afterDigits = false; }
+  }
+  return out;
+}
+function groupImpact(g, targetPn) {
+  const key = pnKey(targetPn);
+  const curs = g.erp.map((e) => e.currency).filter(Boolean);
+  const main = curs.length ? curs.sort((a, b) => curs.filter((x) => x === b).length - curs.filter((x) => x === a).length)[0] : null;
+  const value = g.erp.filter((e) => pnKey(e.pn) !== key && (!main || !e.currency || e.currency === main)).reduce((t, e) => t + (e.value || 0), 0);
+  return { redundant_stock_value: Math.round(value * 100) / 100,
+    bom_lines_to_update: g.where_used.filter((u) => key && u.via && pnKey(u.via) !== key).length };
+}
+
 async function applyDecisions(rows, kind) {
   if (!STATIC || !Array.isArray(rows)) return rows;
+  const details = kind === "group" ? await staticJson("group_details.json") : null;
   const out = [];
   for (const r of rows) {
     const d = latestDecision(kind, r.id);
     if (!d) { out.push(r); continue; }
     const row = { ...r, decision: d.decision, decision_note: d.note, decision_by: d.user, decision_at: d.created,
       decision_master: d.master_uid || "" };
-    if (kind === "group") row.final_master_pn = (d.master_uid && (await pnOf(d.master_uid))) || r.master_pn;
+    if (kind === "group") {
+      row.final_master_pn = (d.master_uid && (await pnOf(d.master_uid))) || r.master_pn;
+      const g = details[r.id];
+      if (g && row.final_master_pn !== g.master_pn) Object.assign(row, groupImpact(g, row.final_master_pn));
+    }
     out.push(row);
   }
   return out;
@@ -80,7 +104,18 @@ async function staticGet(path, params = {}) {
     const top = await applyDecisions(s.top_groups, "group");
     const decided = new Set(memDecisions.filter((d) => d.target_type === "group").map((d) => d.target_id));
     const approved = new Set(memDecisions.filter((d) => d.target_type === "group" && latestDecision("group", d.target_id)?.decision === "approve").map((d) => d.target_id));
-    return { ...s, top_groups: top, decisions: { pending_groups: Math.max(0, s.decisions.pending_groups - decided.size),
+    // money and BOM lines follow targets chosen in this tab
+    const summary = { ...s.summary };
+    const details = await staticJson("group_details.json");
+    for (const id of decided) {
+      const g = details[id], d = latestDecision("group", id);
+      const pn = d?.master_uid ? await pnOf(d.master_uid) : "";
+      if (!g || !pn || pn === g.master_pn) continue;
+      const imp = groupImpact(g, pn);
+      if ((g.currency || summary.currency) === summary.currency) summary.redundant_stock_value += imp.redundant_stock_value - g.redundant_stock_value;
+      summary.bom_lines_to_update += imp.bom_lines_to_update - g.bom_lines_to_update;
+    }
+    return { ...s, summary, top_groups: top, decisions: { pending_groups: Math.max(0, s.decisions.pending_groups - decided.size),
       approved_groups: s.decisions.approved_groups + approved.size } };
   }
   if ((m = p.match(/^runs\/[^/]+\/groups$/))) return applyDecisions(await staticJson("groups.json"), "group");
@@ -103,11 +138,13 @@ async function staticGet(path, params = {}) {
   }
   if ((m = p.match(/^runs\/[^/]+\/findings\/(\w+)$/))) return applyDecisions(await staticJson(`findings_${m[1]}.json`), "issue");
   if ((m = p.match(/^runs\/[^/]+\/mapping$/))) {
-    const rows = await applyDecisions(await effectiveMapping(await staticJson("mapping.json")), "mapping");
-    return rows.map((r) => {
-      if (r.decision && !r.inherited) return r;
-      const g = latestDecision("group", r.group_id);
-      return g ? { ...r, decision: g.decision, decision_by: g.user, decision_at: g.created, decision_note: g.note, inherited: true } : r;
+    // the row's own decision or its group's, whichever was made last
+    return (await effectiveMapping(await staticJson("mapping.json"))).map((r) => {
+      const own = latestDecision("mapping", r.id), grp = latestDecision("group", r.group_id);
+      const pick = grp && (!own || grp.created > own.created) ? grp : own;
+      if (!pick) return { ...r, decision: "", inherited: false };
+      return { ...r, decision: pick.decision, decision_by: pick.user, decision_at: pick.created, decision_note: pick.note,
+        inherited: pick === grp };
     });
   }
   if ((m = p.match(/^runs\/[^/]+\/parts$/))) {
@@ -158,7 +195,13 @@ export async function send(method, path, body) {
     if (path === "/api/decisions") {
       const ids = body.target_ids || [body.target_id];
       const now = new Date().toISOString();
-      ids.forEach((id) => memDecisions.push({ ...body, target_id: id, created: now, user: body.user || "צופה בהדגמה" }));
+      const details = body.target_type === "group" ? await staticJson("group_details.json") : {};
+      ids.forEach((id) => {
+        // like the app: a group decision always records its target (chosen now, chosen before, or proposed)
+        const master = body.target_type === "group"
+          ? body.master_uid || latestDecision("group", id)?.master_uid || details[id]?.master_uid || "" : "";
+        memDecisions.push({ ...body, target_id: id, master_uid: master, created: now, user: body.user || "צופה בהדגמה" });
+      });
       return { ok: true, saved: ids.length };
     }
     throw new Error("בגרסת ההדגמה המקוונת אין חיבור למערכות – הפעולה זמינה באפליקציה המקומית");

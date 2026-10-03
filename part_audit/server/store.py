@@ -21,6 +21,19 @@ CREATE INDEX IF NOT EXISTS ix_decisions_target ON decisions(target_type, target_
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 SECRET_FIELDS = ("password", "app_key", "token")
+MASK = "••••••"
+URL_FIELDS = ("base_url", "server_url", "service_root", "host", "base_path", "fms_url", "path")
+
+
+def secret_keys(kind: str) -> set[str]:
+    """Config keys that are credentials for this kind of source: never returned by the API."""
+    keys = set(SECRET_FIELDS)
+    try:
+        from .. import connectors
+        keys |= {f.name for f in connectors.get(kind).fields if f.type == "password" or f.secret}
+    except KeyError:
+        pass
+    return keys
 
 
 def now() -> str:
@@ -52,12 +65,12 @@ class Store:
         except Exception:
             return None
 
-    def _split_secrets(self, sid: str, cfg: dict, simulated: bool) -> dict:
+    def _split_secrets(self, sid: str, kind: str, cfg: dict, simulated: bool) -> dict:
         """Keep secrets in the OS credential store when one exists (Windows Credential Manager, macOS
         Keychain); otherwise they stay in the local database of this computer."""
         out = dict(cfg)
         kr = None if simulated else self._keyring()
-        for k in SECRET_FIELDS:
+        for k in secret_keys(kind):
             if k in out and out[k] and kr is not None:
                 try:
                     kr.set_password("part-audit", f"{sid}:{k}", out[k])
@@ -66,10 +79,10 @@ class Store:
                     pass
         return out
 
-    def _join_secrets(self, sid: str, cfg: dict) -> dict:
+    def _join_secrets(self, sid: str, kind: str, cfg: dict) -> dict:
         out = dict(cfg)
         kr = None
-        for k in SECRET_FIELDS:
+        for k in secret_keys(kind):
             if out.get(k) == "__keyring__":
                 kr = kr or self._keyring()
                 out[k] = (kr.get_password("part-audit", f"{sid}:{k}") if kr else "") or ""
@@ -83,9 +96,10 @@ class Store:
         for r in rows:
             cfg = json.loads(r["config"])
             if with_secrets:
-                cfg = self._join_secrets(r["id"], cfg)
+                cfg = self._join_secrets(r["id"], r["kind"], cfg)
             else:
-                cfg = {k: ("••••••" if k in SECRET_FIELDS and v else v) for k, v in cfg.items()}
+                hidden = secret_keys(r["kind"])
+                cfg = {k: (MASK if k in hidden and v else v) for k, v in cfg.items()}
             out.append({"id": r["id"], "kind": r["kind"], "name": r["name"], "config": cfg,
                         "enabled": bool(r["enabled"]), "simulated": bool(r["simulated"]),
                         "last_test": json.loads(r["last_test"]) if r["last_test"] else None,
@@ -99,12 +113,16 @@ class Store:
         sid = src.get("id") or f"src-{uuid.uuid4().hex[:8]}"
         old = self.get_source(sid, with_secrets=True) if src.get("id") else None
         cfg = dict(src.get("config") or {})
-        if old:  # keep stored secrets when the form sends the mask back
-            for k in SECRET_FIELDS:
-                if cfg.get(k) in ("••••••", None) and old["config"].get(k):
-                    cfg[k] = old["config"][k]
+        if old:
+            # the form sends the mask back for an unchanged secret: keep the stored one, but only while the
+            # address stays the same (a secret is never sent to a server it was not entered for)
+            same_place = all(str(cfg.get(k, old["config"].get(k, ""))) == str(old["config"].get(k, ""))
+                             for k in URL_FIELDS)
+            for k in secret_keys(src["kind"]):
+                if cfg.get(k, MASK) == MASK:
+                    cfg[k] = old["config"].get(k, "") if same_place else ""
         simulated = bool(src.get("simulated", old["simulated"] if old else False))
-        stored = self._split_secrets(sid, cfg, simulated)
+        stored = self._split_secrets(sid, src["kind"], cfg, simulated)
         with self._lock, self._conn() as c:
             c.execute("""INSERT INTO sources(id, kind, name, config, enabled, simulated, created, updated)
                          VALUES(?,?,?,?,?,?,?,?)

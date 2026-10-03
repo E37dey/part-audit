@@ -152,10 +152,13 @@ class SwPdmWeb(Connector):
                         s = cands[0] if len(cands) == 1 else None
                     if s is not None:
                         dest = self.step_cache_path(s["Id"], s["Version"], s["Name"])
-                        if not dest.exists():
-                            h.download(f"{c['vault']}/files/{s['Id']}/{s['Version']}/download",
-                                       dest, params={"folderId": s["ParentFolderId"]})
-                        rec.step_path, rec.step_name = str(dest), s["Name"]
+                        try:
+                            if not dest.exists():
+                                h.download(f"{c['vault']}/files/{s['Id']}/{s['Version']}/download",
+                                           dest, params={"folderId": s["ParentFolderId"]})
+                            rec.step_path, rec.step_name = str(dest), s["Name"]
+                        except ConnectorError as exc:
+                            rec.step_note = f"הורדת קובץ ה-STEP נכשלה: {exc}"
                     else:
                         rec.step_note = "אין קובץ STEP בכספת לחלק הזה (ניתן להפיק ב-Convert Task של PDM)"
                 try:

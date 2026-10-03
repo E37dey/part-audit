@@ -9,7 +9,7 @@ const MAX_VIEWERS = 6;
 
 export async function render({ el, param, setTitle, refreshStatus }) {
   const g = await get(`/api/runs/latest/groups/${encodeURIComponent(param)}`);
-  const cur = "ILS";
+  const cur = g.currency || "ILS";
   const master = g.decision_master || g.master_uid;
   // proposed part first, then by system (plain code-point order, the same order the static export uses)
   const parts = [...g.parts].sort((a, b) => (a.uid === g.master_uid ? -1 : b.uid === g.master_uid ? 1 : (a.source > b.source) - (a.source < b.source)));

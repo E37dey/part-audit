@@ -39,6 +39,7 @@ def plant(tmp_path_factory):
     shutil.copy(cad / "100-0001 - תושבת.step", cad / "old" / "100-0001_revA.stp")
     (cad / "old" / "מסגרת.dwg").write_bytes(b"AC1027")
     (cad / "broken.step").write_text("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n")
+    shutil.copy(cad / "200-0001 - פלטה.step", cad / "=HYPERLINK(1).step")     # a name that looks like a formula
     (root / "erp.csv").write_text(ERP_CSV, encoding="utf-8")
     return root
 
@@ -61,7 +62,7 @@ def _uid(res, pn, contains=""):
 
 def test_pipeline_finds_the_duplicate_and_the_near_part(result):
     s = result["summary"]
-    assert s["parts"] == 6 and s["erp_items"] == 5
+    assert s["parts"] == 7 and s["erp_items"] == 5
     by_pns = {tuple(g["pns"]): g for g in result["groups"]}
     g = by_pns[("100-0001", "100-0002")]
     assert g["category"] == "geometry"
@@ -72,11 +73,11 @@ def test_pipeline_finds_the_duplicate_and_the_near_part(result):
     pns = {(result["parts"][[q["uid"] for q in result["parts"]].index(p["a"])]["pn"],
             result["parts"][[q["uid"] for q in result["parts"]].index(p["b"])]["pn"]) for p in near}
     assert any("100-0003" in x for x in pns)
-    assert not any("200-0001" in g["pns"] for g in result["groups"])
+    assert not any("100-0001" in g["pns"] and "200-0001" in g["pns"] for g in result["groups"])
 
 
 def test_mapping_has_only_real_part_number_changes(result):
-    rows = result["mapping"]
+    rows = [m for m in result["mapping"] if m["new_pn"].startswith("100-")]
     assert [(m["old_pn"], m["new_pn"]) for m in rows] == [("100-0002", "100-0001")]
 
 
@@ -91,9 +92,22 @@ def test_engineer_can_choose_another_target(result):
     g = next(x for x in result["groups"] if "100-0002" in x["pns"])
     other = _uid(result, "100-0002")
     dec = {f"group:{g['id']}": {"decision": "approve", "master_uid": other, "user": "דנה", "note": "", "created": ""}}
-    rows = effective_mapping(result, dec)
+    rows = [m for m in effective_mapping(result, dec) if m["group_id"] == g["id"]]
     assert [(m["old_pn"], m["new_pn"]) for m in rows] == [("100-0001", "100-0002")]
-    assert rows[0]["target_overridden"] and rows[0]["id"] != result["mapping"][0]["id"]
+    base = next(m for m in result["mapping"] if m["group_id"] == g["id"])
+    assert rows[0]["target_overridden"] and rows[0]["id"] != base["id"]
+
+
+def test_later_decision_wins_between_row_and_group(result):
+    from part_audit.decisions import row_decision
+    m = next(x for x in result["mapping"] if x["old_pn"] == "100-0002")
+    row_ok = {"decision": "approve", "user": "a", "created": "2026-10-04T10:00:00", "note": ""}
+    grp_no = {"decision": "reject", "user": "b", "created": "2026-10-04T11:00:00", "note": ""}
+    d = row_decision(m, {f"mapping:{m['id']}": row_ok, f"group:{m['group_id']}": grp_no})
+    assert d["decision"] == "reject" and d["inherited"]               # a later group rejection cancels the row
+    d = row_decision(m, {f"mapping:{m['id']}": {**row_ok, "created": "2026-10-04T12:00:00"},
+                         f"group:{m['group_id']}": grp_no})
+    assert d["decision"] == "approve" and not d["inherited"]          # a later row decision is an exception
 
 
 def test_excel_is_hebrew_rtl_and_carries_decisions(result, tmp_path):
@@ -105,8 +119,12 @@ def test_excel_is_hebrew_rtl_and_carries_decisions(result, tmp_path):
     wb = load_workbook(out)
     assert all(ws.sheet_view.rightToLeft for ws in wb.worksheets)
     ws = wb['מיפוי מק"טים']
-    row = [c.value for c in ws[3]]
-    assert row[1] == "100-0002" and row[4] == "100-0001" and row[11] == "מאושר" and row[12] == "דנה"
+    rows = [[c.value for c in r] for r in ws.iter_rows(min_row=3)]
+    row = next(r for r in rows if r[1] == "100-0002")
+    assert row[4] == "100-0001" and row[11] == "מאושר" and row[12] == "דנה"
+    # a name that starts with '=' stays text (never a live formula)
+    cells = [c for r in wb["כל החלקים"].iter_rows(min_row=2) for c in r if isinstance(c.value, str) and c.value.startswith("=")]
+    assert cells and all(c.data_type == "s" for c in cells)
 
 
 # ------------------------------------------------------------------------------------------------ web API
@@ -141,9 +159,9 @@ def test_api_flow(client, plant):
     j = _scan(client)
     assert j["status"] == "done", j.get("error")
     summ = client.get("/api/runs/latest/summary").json()
-    assert summ["summary"]["groups"] == 1 and summ["decisions"]["pending_groups"] == 1
+    assert summ["summary"]["groups"] == 2 and summ["decisions"]["pending_groups"] == 2   # brackets; plate + '=' copy
     groups = client.get("/api/runs/latest/groups").json()
-    gid = groups[0]["id"]
+    gid = next(g["id"] for g in groups if "100-0002" in g["pns"])
     g = client.get(f"/api/runs/latest/groups/{gid}").json()
     assert len(g["parts"]) == 3 and g["pairs"]
 
@@ -166,7 +184,7 @@ def test_api_flow(client, plant):
     assert ok.json()["saved"] == 1
     g2 = client.get(f"/api/runs/latest/groups/{gid}").json()
     assert g2["decision"] == "approve" and g2["final_master_pn"] == "100-0002" and len(g2["history"]) == 1
-    rows = client.get("/api/runs/latest/mapping").json()
+    rows = [r for r in client.get("/api/runs/latest/mapping").json() if r["group_id"] == gid]
     assert [(r["old_pn"], r["new_pn"], r["decision"], r.get("inherited")) for r in rows] == [("100-0001", "100-0002", "approve", True)]
 
     # findings, parts search and a part card
@@ -188,6 +206,59 @@ def test_api_flow(client, plant):
 
     # the UI is served
     assert "PartAudit" in client.get("/").text
+
+
+def test_only_this_computer_and_this_page(client):
+    assert client.get("/api/status", headers={"host": "attacker.example:8765"}).status_code == 403
+    r = client.post("/api/sources", json={"kind": "folder", "name": "x", "config": {"path": "/tmp"}},
+                    headers={"origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert client.post("/api/scan", content=b"x", headers={"content-type": "text/plain"}).status_code == 415
+    assert client.get("/api/docs").status_code == 404            # no CDN-backed API docs page
+
+
+def test_group_decisions_keep_their_target(client):
+    groups = client.get("/api/runs/latest/groups").json()
+    gid = next(g["id"] for g in groups if "100-0002" in g["pns"])
+    g = client.get(f"/api/runs/latest/groups/{gid}").json()
+    target = next(p["uid"] for p in g["parts"] if p["pn"] == "100-0001")
+    client.post("/api/decisions", json={"target_type": "group", "target_id": gid, "decision": "review", "master_uid": target})
+    # a bulk approval later must keep the target chosen before
+    client.post("/api/decisions", json={"target_type": "group", "target_ids": [gid], "decision": "approve"})
+    g2 = client.get(f"/api/runs/latest/groups/{gid}").json()
+    assert g2["decision"] == "approve" and g2["decision_master"] == target and g2["final_master_pn"] == "100-0001"
+    assert client.post("/api/decisions", json={"target_type": "group", "target_ids": [gid, gid], "decision": "approve",
+                                               "master_uid": target}).status_code == 400
+
+
+def test_stopped_scan_is_not_kept(client):
+    before = client.get("/api/status").json()["latest_run"]
+    jid = client.post("/api/scan").json()["job_id"]
+    client.post(f"/api/jobs/{jid}/cancel")
+    for _ in range(600):
+        j = client.get(f"/api/jobs/{jid}").json()
+        if j["status"] != "running":
+            break
+        time.sleep(0.2)
+    assert j["status"] == "cancelled"
+    assert client.get("/api/status").json()["latest_run"] == before
+
+
+def test_priority_token_is_a_secret_and_moves_with_the_address(client):
+    sid = client.post("/api/sources", json={"kind": "priority", "name": "P", "config": {
+        "service_root": "https://erp.example/odata/Priority/tabula.ini/demo", "username": "TOKEN123456",
+        "password": "PAT"}}).json()["id"]
+    listed = json.dumps(client.get("/api/sources").json())
+    assert "TOKEN123456" not in listed
+    store = client.app.state.store
+    # the form sends the mask back: kept while the address is the same, dropped when it changes
+    client.put(f"/api/sources/{sid}", json={"config": {"service_root": "https://erp.example/odata/Priority/tabula.ini/demo",
+                                                       "username": "••••••", "password": "••••••"}})
+    assert store.get_source(sid)["config"]["username"] == "TOKEN123456"
+    client.put(f"/api/sources/{sid}", json={"config": {"service_root": "https://other.example/odata/Priority/x/y",
+                                                       "username": "••••••", "password": "••••••"}})
+    assert store.get_source(sid)["config"]["username"] == "" and store.get_source(sid)["config"]["password"] == ""
+    client.delete(f"/api/sources/{sid}")
 
 
 def test_passwords_are_not_returned(client):

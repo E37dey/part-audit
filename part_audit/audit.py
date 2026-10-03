@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .names import (NameIndex, NameParts, best_match, blocking_pairs, is_generic_product_name, parse_name,
-                    pn_core, pn_key)
+                    pn_core, pn_key, pn_letters_compatible)
 from .scan import SkipRecord, load_erp, scan_folder
 from .scoring import Item, Pair, Thresholds, build_pairs, duplicate_groups, propose_mapping
 from .stdparts import parse_spec
@@ -90,7 +90,7 @@ def build_items(records, erp_rows: list[dict] | None) -> dict[str, Item]:
         if it.erp is None:
             for pn in cands:
                 rows = by_core.get(pn_core(pn), [])
-                if len(rows) == 1:
+                if len(rows) == 1 and pn_letters_compatible(pn, rows[0]["part_number"]):
                     it.erp, it.erp_link = rows[0], f"part number digits of '{pn}' = ERP '{rows[0]['part_number']}'"
                     break
         if it.erp:

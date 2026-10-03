@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Callable
 
 from . import connectors
+from .decisions import group_impact
 from .explain import CATEGORY_HE, CATEGORY_HINT_HE, pair_reason_he
 from .model import ErpItem, PartRecord, Snapshot, SourceInfo
-from .names import is_generic_product_name, parse_name, pn_core, pn_key
+from .names import is_generic_product_name, parse_name, pn_core, pn_key, pn_letters_compatible
 from .quality import bom_checks, erp_checks, record_checks
 from .scan import FileRecord, read_step_record
 from .scoring import Item, Thresholds, build_pairs, duplicate_groups, finish_key, material_key
@@ -152,7 +153,7 @@ def build_items(snap: Snapshot, progress: Progress) -> tuple[dict[str, Item], di
             else:
                 core = pn_core(r.pn)
                 cands = erp_by_core.get(core, []) if len(core) >= 4 else []
-                if len(cands) == 1:
+                if len(cands) == 1 and pn_letters_compatible(r.pn, cands[0].pn):
                     e = cands[0]
                     it.erp_link = f"ספרות המק\"ט {r.pn} = ERP {e.pn}"
         if e is not None:
@@ -312,7 +313,8 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
                 seen_pn.add(e.pn)
                 val = None if e.unit_cost is None else round(e.stock_total * e.unit_cost, 2)
                 erp_rows.append({"pn": e.pn, "description": e.description, "stock": e.stock_total, "unit_cost": e.unit_cost,
-                                 "value": val, "status": e.status, "active": e.active, "supplier": e.supplier,
+                                 "value": val, "currency": e.currency or settings.currency, "status": e.status,
+                                 "active": e.active, "supplier": e.supplier,
                                  "is_master": bool(master.pn) and pn_key(e.pn) == pn_key(master.pn)})
         used = []
         for r in members:
@@ -329,13 +331,12 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
             for t in _top_products(r.uid, parents_of, by_uid):
                 if t != r.uid:
                     products.add(t)
-        redundant = [x for x in erp_rows if not x["is_master"]]
-        red_value = sum(x["value"] or 0 for x in redundant) if redundant else 0.0
         category = "standard" if "standard_part" in cats else "geometry"
         best = max((pair_by_key[(x, y)] for x in gm for y in gm if (x, y) in pair_by_key
                     and pair_by_key[(x, y)]["category"] in ("identical", "standard_part")),
                    key=lambda r: r["confidence"], default=None)
-        lines_to_update = sum(1 for u in used if u["via"] and master.pn and pn_key(u["via"]) != pn_key(master.pn))
+        impact = group_impact({"erp": erp_rows, "pns": pns, "where_used": used}, master.pn or "")
+        main_cur = impact["currency"]
         row = {"id": gid, "members": gm, "category": category, "pns": pns,
                "sources": sorted({src_name.get(r.source_id, r.source_id) for r in members}),
                "cross_source": len({r.source_id for r in members}) > 1, "master_uid": master.uid, "master_pn": master.pn,
@@ -344,9 +345,10 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
                "spec": (items[gm[0]].spec.label if items[gm[0]].spec else ""), "where_used": used,
                "products": sorted(by_uid[t].pn or by_uid[t].name for t in products),
                "erp": erp_rows, "stock_total": sum(x["stock"] for x in erp_rows),
-               "stock_value": round(sum(x["value"] or 0 for x in erp_rows), 2),
-               "redundant_pns": max(0, len(pns) - 1), "redundant_stock_value": round(red_value, 2),
-               "bom_lines_to_update": lines_to_update, "name": master.name}
+               "stock_value": round(sum(x["value"] or 0 for x in erp_rows if not main_cur or x["currency"] == main_cur), 2),
+               "currency": main_cur or settings.currency,
+               "redundant_pns": impact["redundant_pns"], "redundant_stock_value": impact["redundant_stock_value"],
+               "bom_lines_to_update": impact["bom_lines_to_update"], "name": master.name}
         group_rows.append(row)
         for u in gm:
             group_of[u] = gid
@@ -356,7 +358,9 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
             if any(m["old_pn"] == r.pn and m["group_id"] == gid for m in mapping):
                 continue
             pr = pair_by_key.get(tuple(sorted((r.uid, master.uid))))
-            mapping.append({"id": _gid("M", [gid, r.pn]), "group_id": gid, "old_pn": r.pn, "old_uid": r.uid,
+            # the id includes the target: an approval of "X -> A" never applies to "X -> B" after a rescan
+            mapping.append({"id": _gid("M", [gid, r.pn, "target:" + (master.pn or "")]), "group_id": gid,
+                            "old_pn": r.pn, "old_uid": r.uid,
                             "old_name": r.name, "old_source": src_name.get(r.source_id, r.source_id),
                             "new_pn": master.pn, "new_uid": master.uid, "new_name": master.name,
                             "reason_he": (pr["reason_he"] if pr else row["reason_he"]),
@@ -463,7 +467,12 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
         })
 
     # ------------------------------------------------------------------ summary
-    red_value = sum(g["redundant_stock_value"] for g in group_rows)
+    # money is added up in one currency only (the most common one); groups priced in another are counted apart
+    cur_count = defaultdict(int)
+    for g in group_rows:
+        cur_count[g["currency"]] += 1
+    main_currency = max(cur_count, key=cur_count.get) if cur_count else settings.currency
+    red_value = sum(g["redundant_stock_value"] for g in group_rows if g["currency"] == main_currency)
     sev = defaultdict(int)
     for q in quality + erp_issues:
         if q["severity"] != "info":
@@ -478,7 +487,8 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
         "groups_standard": sum(1 for g in group_rows if g["category"] == "standard"),
         "parts_in_groups": sum(len(g["members"]) for g in group_rows),
         "redundant_pns": sum(g["redundant_pns"] for g in group_rows),
-        "redundant_stock_value": round(red_value, 2), "currency": settings.currency,
+        "redundant_stock_value": round(red_value, 2), "currency": main_currency,
+        "groups_other_currency": sum(1 for g in group_rows if g["currency"] != main_currency),
         "bom_lines_to_update": sum(g["bom_lines_to_update"] for g in group_rows),
         "near_pairs": cat_count.get("near_identical", 0), "mirror_pairs": cat_count.get("mirror", 0),
         "spec_conflicts": cat_count.get("identical_attr_conflict", 0),

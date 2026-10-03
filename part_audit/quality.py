@@ -76,6 +76,8 @@ def record_checks(parts: list, fps: dict, settings) -> list[dict]:
         sigs = Counter(pn_signature(r.pn) for r in recs if r.pn)
         total = sum(sigs.values())
         common = {s for s, n in sigs.items() if n / max(total, 1) >= 0.05}
+        # a description field this source normally fills (80% of 20+ records) and this record leaves empty
+        desc_habit = len(recs) >= 20 and sum(1 for r in recs if r.description.strip()) >= 0.8 * len(recs)
         for r in recs:
             if not r.pn:
                 if not is_folder:
@@ -86,6 +88,9 @@ def record_checks(parts: list, fps: dict, settings) -> list[dict]:
                                  pn=r.pn, signature=pn_signature(r.pn), usual=top))
             if not is_folder and not (r.name or r.description).strip():
                 out.append(issue("missing_description", "high", [r.uid], "לרשומה אין תיאור/שם"))
+            elif desc_habit and not r.description.strip():
+                out.append(issue("missing_description", "low", [r.uid],
+                                 "שדה התיאור ריק, אף שברוב הרשומות במקור הזה הוא מלא"))
             if not is_folder and r.kind == "part" and r.make_buy != "buy" and not r.material.strip():
                 out.append(issue("missing_material", "medium", [r.uid], "לא מוגדר חומר לחלק ייצור"))
             if not is_folder and r.native_file and r.pn:

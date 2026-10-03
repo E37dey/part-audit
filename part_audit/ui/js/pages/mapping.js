@@ -15,12 +15,12 @@ export async function render({ el, setTitle, refreshStatus, state }) {
   el.innerHTML = `
     <section class="kpis">
       <div class="kpi"><span class="label">שורות מיפוי</span><span class="value">${n0(rows.length)}</span><span class="note">מק"ט קיים ← מק"ט שנשאר</span></div>
-      <div class="kpi"><span class="label">אושרו</span><span class="value" style="color:var(--ok)" id="k-ok">${n0(count("approve"))}</span><span class="note">ייכנסו לקובץ הביצוע</span></div>
-      <div class="kpi"><span class="label">נדחו</span><span class="value" style="color:var(--bad)" id="k-bad">${n0(count("reject"))}</span><span class="note">לא ישונו</span></div>
+      <div class="kpi"><span class="label">אושרו</span><span class="value" style="color:var(--ok)" id="k-ok">${n0(count("approve"))}</span><span class="note">מסומנות "מאושר" בקובץ ה-Excel – לביצוע</span></div>
+      <div class="kpi"><span class="label">נדחו</span><span class="value" style="color:var(--bad)" id="k-bad">${n0(count("reject"))}</span><span class="note">מסומנות "נדחה" – לא משנים</span></div>
       <div class="kpi"><span class="label">ממתינים</span><span class="value" id="k-wait">${n0(count("pending"))}</span><span class="note">החלטה על קבוצה חלה על כל השורות שלה</span></div>
     </section>
     <div class="callout small">התוכנה לא משנה שום דבר ב-ERP או ב-PDM. אחרי האישורים מייצאים קובץ Excel, והצוות מבצע את ההחלפות לפי הנהלים שלכם.
-      החלטה על שורה בודדת גוברת על ההחלטה של הקבוצה.</div>
+      ההחלטה האחרונה קובעת: החלטה על שורה אחרי ההחלטה על הקבוצה היא חריג לשורה הזו, והחלטה חדשה על הקבוצה חלה שוב על כל השורות שלה.</div>
     <div class="panel">
       <div class="panel-h toolbar">
         <input type="search" id="q" placeholder='חיפוש לפי מק"ט או שם' aria-label="חיפוש">

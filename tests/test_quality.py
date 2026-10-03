@@ -49,3 +49,24 @@ def test_folder_records_are_not_held_to_pdm_rules():
     recs = [_rec(i, "", source_kind="folder", source_id="dir", material="") for i in range(3)]
     out = record_checks(recs, {}, ProjectSettings())
     assert not [q for q in out if q["type"] in ("missing_pn", "missing_material", "pn_format", "no_step")]
+
+
+def test_empty_description_where_the_source_always_has_one():
+    recs = [_rec(i, f"200-{1000 + i}", description=f"פלטה {i} מלאה") for i in range(24)]
+    recs.append(_rec(50, "200-1050", description=""))                # the one record left empty
+    out = record_checks(recs, {}, ProjectSettings())
+    assert {u for q in out if q["type"] == "missing_description" for u in q["uids"]} == {"pdm:50"}
+    # a source that does not use the field at all is not flagged
+    recs = [_rec(i, f"200-{1000 + i}", description="") for i in range(24)]
+    assert not [q for q in record_checks(recs, {}, ProjectSettings()) if q["type"] == "missing_description"]
+
+
+def test_static_export_never_overwrites_a_foreign_folder(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    (tmp_path / "keep.txt").write_text("my file")
+    r = subprocess.run([sys.executable, str(root / "tools" / "export_static.py"), "--workspace", str(tmp_path / "ws"),
+                        "--out", str(tmp_path)], capture_output=True, text=True, timeout=120)
+    assert r.returncode != 0 and (tmp_path / "keep.txt").read_text() == "my file"

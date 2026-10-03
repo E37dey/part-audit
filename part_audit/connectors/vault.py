@@ -131,7 +131,7 @@ class VaultRest(Connector):
                     uid=self.uid(f["file"]["id"]), source_id=self.source_id, source_kind=self.kind,
                     native_id=str(f["file"]["id"]), kind="assembly" if is_asm else "part", pn=pn,
                     name=str(props.get(c["prop_description"]) or props.get(c["prop_title"]) or "").strip(),
-                    description=str(props.get(c["prop_title"]) or ""), revision=str(f.get("revision") or ""),
+                    description=str(props.get(c["prop_description"]) or ""), revision=str(f.get("revision") or ""),
                     version=str(f.get("version", "")), state=state, state_class=classify_state(state),
                     material=str(props.get(c["prop_material"]) or ""), mass_kg=mass_to_kg(props.get(c["prop_mass"])),
                     mass_text=str(props.get(c["prop_mass"]) or ""),
@@ -146,8 +146,12 @@ class VaultRest(Connector):
                     if s is not None:
                         dest = self.step_cache_path(s["id"], s.get("version", ""), s["name"])
                         if not dest.exists():
-                            h.download(f"vaults/{vid}/file-versions/{s['id']}/content", dest)
-                        rec.step_path, rec.step_name = str(dest), s["name"]
+                            try:
+                                h.download(f"vaults/{vid}/file-versions/{s['id']}/content", dest)
+                            except ConnectorError as exc:
+                                rec.step_note = f"הורדת קובץ ה-STEP נכשלה: {exc}"
+                        if dest.exists():
+                            rec.step_path, rec.step_name = str(dest), s["name"]
                     else:
                         rec.step_note = "אין קובץ STEP בכספת (ניתן להפיק עם Job Processor)"
                 else:

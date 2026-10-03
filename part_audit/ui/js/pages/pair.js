@@ -10,6 +10,7 @@ const LABELS = {
   identical_attr_conflict: { approve: "טעות רישום – לתקן", reject: "חלקים שונים באמת", review: "לבדיקה" },
   mirror: { approve: "תקין – ימין ושמאל", reject: "יש טעות בסימון", review: "לבדיקה" },
   conflict: { approve: "לתקן את המק\"ט", reject: "תקין", review: "לבדיקה" },
+  conflict_unverified: { approve: "לתקן את המק\"ט", reject: "תקין", review: "לבדיקה" },
 };
 
 export async function render({ el, param, setTitle, refreshStatus }) {
