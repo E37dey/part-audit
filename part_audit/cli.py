@@ -1,5 +1,6 @@
 """Command line interface.
 
+    python -m part_audit app [--port 8765] [--workspace DIR]   # the local Hebrew web app (opens the browser)
     python -m part_audit scan DATA_DIR [--erp erp.csv] [--out out/report.xlsx]
     python -m part_audit fingerprint FILE.step        # debug one file
 """
@@ -42,7 +43,17 @@ def main(argv: list[str] | None = None) -> int:
     fp = sub.add_parser("fingerprint", help="print the geometry fingerprint of one STEP file")
     fp.add_argument("file")
 
+    ap_app = sub.add_parser("app", help="start the local web app (Hebrew UI) on 127.0.0.1")
+    ap_app.add_argument("--port", type=int, default=8765)
+    ap_app.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 unless you know you need otherwise")
+    ap_app.add_argument("--workspace", default=str(Path.home() / "PartAudit"),
+                        help="folder for the app database, caches, results and exports")
+    ap_app.add_argument("--no-demo", action="store_true", help="do not offer the demo environment")
+    ap_app.add_argument("--no-browser", action="store_true")
+
     args = ap.parse_args(argv)
+    if args.cmd == "app":
+        return run_app(args)
     if args.cmd == "fingerprint":
         from .geometry import fingerprint_path
         print(json.dumps(fingerprint_path(args.file), indent=1, default=str))
@@ -79,6 +90,22 @@ def main(argv: list[str] | None = None) -> int:
         for row in res.metrics.get("per_type", []):
             print(f"  {row['type']:<34} n={row['n_pairs']} tp={row['tp']} fp={row['fp']} P={row['precision']} "
                   f"R={row['recall']} F1={row['f1']} target={row['target']} met={row['met']}")
+    return 0
+
+
+def run_app(args) -> int:
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from .server.app import create_app
+    url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '') else args.host}:{args.port}"
+    app = create_app(args.workspace, demo=not args.no_demo, base_url=url)
+    print(f"PartAudit is running: {url}  (workspace: {args.workspace})  - close this window to stop")
+    if not args.no_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
 
 
