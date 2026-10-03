@@ -11,7 +11,8 @@ export async function render({ el, param, setTitle, refreshStatus }) {
   const g = await get(`/api/runs/latest/groups/${encodeURIComponent(param)}`);
   const cur = "ILS";
   const master = g.decision_master || g.master_uid;
-  const parts = [...g.parts].sort((a, b) => (a.uid === g.master_uid ? -1 : b.uid === g.master_uid ? 1 : a.source.localeCompare(b.source, "he")));
+  // proposed part first, then by system (plain code-point order, the same order the static export uses)
+  const parts = [...g.parts].sort((a, b) => (a.uid === g.master_uid ? -1 : b.uid === g.master_uid ? 1 : (a.source > b.source) - (a.source < b.source)));
   const byUid = Object.fromEntries(parts.map((p) => [p.uid, p]));
   const withStep = parts.filter((p) => p.has_step);
   setTitle(g.name || "קבוצת כפילות", `<a href="#/groups">כפילויות</a> / ${esc(g.spec || g.master_pn || g.id)}`);

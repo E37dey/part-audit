@@ -22,15 +22,30 @@ export function parseMesh(buf) {
 export function parseCompare(buf) {
   const dv = new DataView(buf);
   const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-  if (magic !== "PAC2") throw new Error("קובץ השוואה לא תקין");
+  if (magic !== "PAC2" && magic !== "PAC3") throw new Error("קובץ השוואה לא תקין");
   const na = dv.getUint32(4, true), nta = dv.getUint32(8, true), nb = dv.getUint32(12, true), ntb = dv.getUint32(16, true);
   const matrix = [...new Float32Array(buf.slice(20, 84))];
   const [max, p95, median, mirror] = new Float32Array(buf.slice(84, 100));
   let off = 100;
+  const pad = () => { off += (4 - (off % 4)) % 4; };
   const take = (n, nt) => {
-    const pos = new Float32Array(buf.slice(off, off + n * 12)); off += n * 12;
-    const idx = new Uint32Array(buf.slice(off, off + nt * 12)); off += nt * 12;
-    const dev = new Float32Array(buf.slice(off, off + n * 4)); off += n * 4;
+    if (magic === "PAC2") {
+      const pos = new Float32Array(buf.slice(off, off + n * 12)); off += n * 12;
+      const idx = new Uint32Array(buf.slice(off, off + nt * 12)); off += nt * 12;
+      const dev = new Float32Array(buf.slice(off, off + n * 4)); off += n * 4;
+      return { pos, idx, dev };
+    }
+    // PAC3 (online demo): 16-bit positions relative to the box, 16-bit indices when they fit, 16-bit deviations
+    const [x0, y0, z0, sx, sy, sz] = new Float32Array(buf.slice(off, off + 24)); off += 24;
+    const q = new Uint16Array(buf.slice(off, off + n * 6)); off += n * 6; pad();
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { pos[3 * i] = x0 + q[3 * i] * sx; pos[3 * i + 1] = y0 + q[3 * i + 1] * sy; pos[3 * i + 2] = z0 + q[3 * i + 2] * sz; }
+    const wide = n >= 65536;
+    const idx = wide ? new Uint32Array(buf.slice(off, off + nt * 12)) : Uint32Array.from(new Uint16Array(buf.slice(off, off + nt * 6)));
+    off += nt * (wide ? 12 : 6); pad();
+    const dmax = new DataView(buf, off, 4).getFloat32(0, true); off += 4;
+    const qd = new Uint16Array(buf.slice(off, off + n * 2)); off += n * 2; pad();
+    const dev = Float32Array.from(qd, (x) => (x / 65535) * dmax);
     return { pos, idx, dev };
   };
   const A = take(na, nta), B = take(nb, ntb);
