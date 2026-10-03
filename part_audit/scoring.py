@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from .names import NameIndex, NameMatch, NameParts, best_match, blocking_pairs
+from .stdparts import StdSpec, compare_specs
 
 # unit conversion factors that explain an exact uniform scale between two files
 UNIT_FACTORS = {
@@ -65,6 +66,8 @@ class Item:
     erp: dict | None = None                       # linked ERP row
     erp_link: str = ""                            # how the ERP row was linked
     fp: dict | None = None                        # geometry fingerprint (L3)
+    spec: StdSpec | None = None                   # standard-part designation, if the names give one
+    material: str = ""                            # material recorded in the PDM/PLM (if any)
 
 
 # --------------------------------------------------------------------------- geometry comparison
@@ -243,7 +246,10 @@ def material_key(text: str) -> str:
 
 
 def item_material(it: Item) -> tuple[str, str]:
-    """(material key, label) from the linked ERP row, else from a material named in the file/STEP name."""
+    """(material key, label): PDM property, else the linked ERP row, else a material named in a name."""
+    if str(getattr(it, "material", "") or "").strip():
+        m = str(it.material).strip()
+        return material_key(m), f"{m} (PDM)"
     if it.erp and str(it.erp.get("material", "")).strip():
         m = str(it.erp["material"]).strip()
         return material_key(m), f"{m} (ERP)"
@@ -287,7 +293,7 @@ def enforce_material_consistency(pairs: list["Pair"], items: dict[str, Item]) ->
         if k:
             mats.setdefault(uf.find(x), {})[k] = label
     for p in pairs:
-        if p.category != "identical":
+        if p.category not in MERGE_CATEGORIES:
             continue
         known = mats.get(uf.find(p.a), {})
         keys = sorted(known)
@@ -318,6 +324,11 @@ class Pair:
     confidence: float = 0.0
     reason: str = ""
     merge_ok: bool = False
+    spec_relation: str = ""            # standard parts: same | different_size | spec_conflict | different_type
+    spec_note: str = ""
+
+
+MERGE_CATEGORIES = ("identical", "standard_part")
 
 
 def _fmt_pct(x: float) -> str:
@@ -390,6 +401,39 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
             how.append("a reflection aligns the surfaces, no rotation does")
         p.reason = ("same size and properties but mirror image (left/right-hand version?) - different parts; "
                     + ", ".join(how))
+
+    # ---- standard parts: the designation decides what 'same item' means
+    sa, sb = getattr(a, "spec", None), getattr(b, "spec", None)
+    p.spec_relation, p.spec_note = compare_specs(sa, sb)
+    if p.spec_relation == "spec_conflict" and p.geo_relation in ("identical", "unit_scaled", "near"):
+        p.category, p.merge_ok = "identical_attr_conflict", False
+        p.confidence = max(p.confidence, 0.85)
+        p.reason = (f"same geometry but a different specification ({p.spec_note}) - different purchased items, "
+                    f"do not merge" + (f"; {p.reason}" if p.reason else ""))
+        if name_txt:
+            p.reason += f"; {name_txt}"
+        return p
+    if p.spec_relation == "same" and p.geo_relation in ("identical", "unit_scaled", "near", "unknown"):
+        p.attr_issues = erp_attribute_conflicts(a, b)
+        label = sa.label if sa else ""
+        geo_txt = {"identical": "identical geometry", "unit_scaled": "identical geometry up to a unit factor",
+                   "near": "small geometry differences (different CAD library detail)",
+                   "unknown": "geometry not compared"}[p.geo_relation]
+        if p.attr_issues:
+            p.category, p.merge_ok = "identical_attr_conflict", False
+            p.reason = f"same standard part {label} but ERP " + "; ".join(p.attr_issues) + " - review"
+        else:
+            p.category, p.merge_ok = "standard_part", True
+            p.confidence = {"identical": 0.97, "unit_scaled": 0.9, "near": 0.9, "unknown": 0.8}[p.geo_relation]
+            p.reason = (f"same standard part {label}" + (f" ({p.spec_note})" if p.spec_note else "") + f"; {geo_txt}"
+                        + (f"; {p.reason}" if p.reason and p.geo_relation != "identical" else ""))
+        if name_txt:
+            p.reason += f"; {name_txt}"
+        return p
+    if p.spec_relation in ("different_size", "different_type") and p.geo_relation in ("near", "unknown", "different"):
+        p.category = ""   # different standard sizes are deliberately different items
+        p.reason = f"different standard parts ({p.spec_note})"
+        return p
 
     # ---- category
     if p.geo_relation in ("identical", "unit_scaled"):
@@ -536,7 +580,7 @@ def duplicate_groups(pairs: list[Pair]) -> list[list[str]]:
     """Connected components of merge-eligible identical pairs (sorted, largest first)."""
     uf = UnionFind()
     for p in pairs:
-        if p.category == "identical" and p.merge_ok:
+        if p.category in MERGE_CATEGORIES and p.merge_ok:
             uf.union(p.a, p.b)
     comps: dict[str, list[str]] = {}
     for x in list(uf.parent):
@@ -552,7 +596,7 @@ def propose_mapping(groups: list[list[str]], items: dict[str, Item], pairs: list
     Rule: prefer a PN that exists in the ERP, then the PN used by most files, then the
     lowest (oldest-looking) PN. Every row is 'pending approval'.
     """
-    conf: dict[tuple[str, str], Pair] = {(p.a, p.b): p for p in pairs if p.category == "identical"}
+    conf: dict[tuple[str, str], Pair] = {(p.a, p.b): p for p in pairs if p.category in MERGE_CATEGORIES}
     rows: list[dict] = []
     for gi, g in enumerate(groups, start=1):
         by_key: dict[str, list[str]] = {}

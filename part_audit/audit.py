@@ -14,6 +14,7 @@ from .names import (NameIndex, NameParts, best_match, blocking_pairs, is_generic
                     pn_core, pn_key)
 from .scan import SkipRecord, load_erp, scan_folder
 from .scoring import Item, Pair, Thresholds, build_pairs, duplicate_groups, propose_mapping
+from .stdparts import parse_spec
 
 
 @dataclass
@@ -100,6 +101,9 @@ def build_items(records, erp_rows: list[dict] | None) -> dict[str, Item]:
         elif cands:
             it.pn = cands[0]
         it.pn_key = pn_key(it.pn) if it.pn else ""
+        it.spec = parse_spec(rec.stem, *(f"{p_[0]} {p_[1]}" for p_ in rec.products[:1]),
+                             str(it.erp.get("description", "")) if it.erp else "",
+                             str(it.erp.get("material", "")) if it.erp else "")
         items[rec.file_id] = it
     return items
 

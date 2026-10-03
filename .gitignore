@@ -10,3 +10,4 @@ out/*
 !out/.gitkeep
 .part_audit_cache/
 *.egg-info/
+demo/factory/
