@@ -1,6 +1,123 @@
 # Measured results
 
-All numbers below were produced by the scripts in `tools/` on the data described; nothing is estimated. Synthetic data: accuracy is an upper bound for real factory data.
+All numbers below were produced by the scripts in `tools/` on the data described; nothing is estimated.
+All data is synthetic or public: accuracy is an upper bound for real factory data.
+
+## v2: demo factory, end to end (`results/demo_factory_eval.json`)
+
+`python tools/factory/evaluate.py --workers 2` reads the six demo sources through the real connectors from the local
+API simulators (SOLIDWORKS PDM Web API, Vault, Windchill, Teamcenter, a legacy folder, Priority), runs the audit and
+compares the result with what the factory builder planted (`demo/factory/factory.json`, `truth`). The factory has
+472 parts, 29 assemblies and 434 ERP items; business data is synthetic, standard-part
+geometry follows ISO/DIN dimensions, and 5 NIST test models are included. Time: 4.5 s reading,
+40.7 s audit (2 workers, cold cache).
+
+**Duplicate pairs** (pairs of records that are the same part): 318 true, 297 predicted,
+**297 correct, 0 wrong, 21 missed: precision 100.0%, recall 93.4%**.
+With a STEP file on both sides: 253 of 256 (98.8%). With a STEP file missing (names, part numbers and
+specs only): 44 of 62 (71.0%).
+
+| How the copy was made | STEP files | Found | Total | Recall |
+|---|---|---:|---:|---:|
+| base+copy | both STEP | 7 | 7 | 100.0% |
+| base+moved | STEP missing | 0 | 3 | 0.0% |
+| base+moved | both STEP | 17 | 17 | 100.0% |
+| base+reexport | STEP missing | 1 | 6 | 16.7% |
+| base+reexport | both STEP | 10 | 10 | 100.0% |
+| base+saveas | STEP missing | 0 | 1 | 0.0% |
+| base+saveas | both STEP | 11 | 11 | 100.0% |
+| base+split | STEP missing | 0 | 1 | 0.0% |
+| base+split | both STEP | 6 | 6 | 100.0% |
+| base+unit_error | both STEP | 5 | 5 | 100.0% |
+| copy+saveas | both STEP | 1 | 1 | 100.0% |
+| copy+split | both STEP | 2 | 2 | 100.0% |
+| library | STEP missing | 43 | 50 | 86.0% |
+| library | both STEP | 186 | 186 | 100.0% |
+| moved | both STEP | 1 | 1 | 100.0% |
+| moved+reexport | STEP missing | 0 | 1 | 0.0% |
+| moved+split | both STEP | 1 | 1 | 100.0% |
+| moved+unit_error | both STEP | 1 | 1 | 100.0% |
+| near | both STEP | 1 | 1 | 100.0% |
+| nist | both STEP | 2 | 5 | 40.0% |
+| reexport | both STEP | 1 | 1 | 100.0% |
+| saveas+unit_error | both STEP | 1 | 1 | 100.0% |
+
+Missed pairs (the first 15 of 21, as listed by the evaluation script):
+
+- `nist_ctc_04_asme1_ap203` / `TEST PART CTC-04` (nist, both STEP): got near_identical
+- `תושבת זוויתית 45x70x35 final` / `תושבת זוויתית 45x70x35` (base+reexport, STEP missing): got name_similar
+- `200-9778 צינור Ø30x2 L=250` / `Tube d30x2 l=250` (moved+reexport, STEP missing): got name_similar
+- `N-PUL-0437_revA` / `PULLEY D80x30` (base+reexport, STEP missing): got name_similar
+- `N-SHF-0626 IDLER SHAFT D15x120` / `IDLER SHAFT D15x120` (base+reexport, STEP missing): got name_similar
+- `ידית U 180 מ"מ` / `ידית U 180 מ"מ` (library, STEP missing): got name_similar
+- `פרופיל אלומיניום 40x40 L=400` / `AL PROFILE 40x40 L=400` (library, STEP missing): got name_similar
+- `פרופיל אלומיניום 40x40 L=1000` / `פרופיל אלומיניום 40x40 L=1000` (library, STEP missing): got not flagged
+- `פלטת חיבור 100x60x8` / `פלטת חיבור` (base+saveas, STEP missing): got name_similar
+- `צינור Ø30x2 L=250` / `Tube d30x2 l=250` (base+moved, STEP missing): got name_similar
+- `תושבת זוויתית 60x60x40 ימני` / `BRACKET,ANGLE,60X60X40,RH` (base+moved, STEP missing): got name_similar
+- `בלוק הידוק 100x40x30` / `Clamp block 100x40x30` (base+reexport, STEP missing): got name_similar
+- `PROFILE,AL,40X40,L1000` / `פרופיל אלומיניום 40x40 L=1000` (library, STEP missing): got not flagged
+- `PROFILE,AL,40X40,L2000` / `Al profile 40x40 l=2000` (library, STEP missing): got name_similar
+- `BUSHING,PLAIN,8X12X10` / `Plain bushing 8/12x10 nylon` (base+split, STEP missing): got name_similar
+
+**Same design, not a duplicate** (planted variants that must not be merged; outcome -> count):
+
+| Variant -> outcome | Pairs |
+|---|---:|
+| legacy_only -> (not flagged) (not merged) | 4 |
+| mirror -> (not flagged) (not merged) | 1 |
+| mirror -> mirror (not merged) | 5 |
+| near (volume change <= 10%) -> conflict (not merged) | 3 |
+| near (volume change <= 10%) -> mirror (not merged) | 1 |
+| near (volume change <= 10%) -> name_similar (not merged) | 11 |
+| near (volume change <= 10%) -> near_identical (not merged) | 23 |
+| near (volume change > 10%) -> name_similar (not merged) | 4 |
+| oldrev -> (not flagged) (not merged) | 1 |
+| oldrev -> conflict (not merged) | 4 |
+| oldrev -> name_similar (not merged) | 4 |
+
+**Hard negatives** (same geometry, different specification: 8.8 / 12.9 / A2, 2RS / ZZ):
+
+| Outcome | Pairs |
+|---|---:|
+| not merged / (not flagged) | 3 |
+| not merged / identical_attr_conflict | 15 |
+
+**NIST models** (the same test case exported by different CAD systems vs different test cases):
+
+| Outcome | Pairs |
+|---|---:|
+| different case -> (not flagged) | 40 |
+| same case -> identical | 2 |
+| same case -> near_identical | 3 |
+
+**Planted data-quality and ERP issues** (`on unplanted records`: issues of the same check on records where nothing
+was planted; these were not verified one by one and can be real consequences of the factory data):
+
+| Planted | Check | Planted | Found | On unplanted records |
+|---|---|---:|---:|---:|
+| missing_material | `missing_material` | 7 | 7 | 0 |
+| stale_mass_high | `mass_mismatch` | 2 | 2 | 1 |
+| stale_mass_low | `mass_mismatch` | 9 | 8 | 1 |
+| filename_pn_mismatch | `filename_pn_mismatch` | 6 | 6 | 0 |
+| pn_format | `pn_format` | 4 | 4 | 0 |
+| bom_state_in_work | `bom_state` | 2 | 2 | 3 |
+| bom_state_obsolete | `obsolete_in_use` | 2 | 2 | 6 |
+| missing_in_erp | `released_not_in_erp` | 8 | 8 | 0 |
+| erp_description_differs | `erp_description_mismatch` | 8 | 8 | 0 |
+| erp_material_differs | `erp_material_mismatch` | 5 | 5 | 1 |
+| erp_bom_qty_differs | `erp_bom_mismatch` | 2 | 2 | 0 |
+| obsolete_but_active_in_erp | `erp_status_mismatch` | 8 | 8 | 0 |
+| unit_error (archive) | `unit_error` | 5 | 5 | – |
+
+## v1 held-out test set re-run with the v2 engine
+
+The v1 test set (below) was scored again on 2026-10-04 with the v2 engine (`results/test_metrics_v2_engine.json`).
+Every metric is identical to the v1 numbers after the documented post-freeze L3b fix
+(`results/test_metrics.json`): A-D 100% precision and recall, E precision 98.1% / recall 100%, F F1 0.781,
+2 false positives in 235 flagged pairs.
+
+# v1 results
 
 ## Test sets
 

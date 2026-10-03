@@ -1,0 +1,192 @@
+# Part Data Audit – v1 command line (folder of STEP files + ERP CSV)
+
+> This is the v1 documentation, kept as is. The v2 app (Hebrew UI, PDM/PLM/ERP connectors) is described in the [main README](../README.md). The v1 command line still works: `python -m part_audit scan ...`.
+
+A local command-line tool that scans a folder of STEP files plus an ERP export (CSV). It finds:
+
+* duplicate parts and parts that are nearly the same,
+* part numbers used inconsistently, and names that differ for the same part.
+
+It writes an Excel report that includes a proposed part-number mapping for a person to approve.
+
+* **Read-only.** It never writes to an ERP or CAD system. Every proposed mapping has the status
+  "pending approval" and comes with a reason and a confidence value.
+* **Local.** It makes no network calls. The optional LLM layer (L4) is off by default and only accepts
+  a `localhost` endpoint unless you explicitly allow another one.
+* **Demo status.** It has been tested on public and synthetic data only. Every number in this file and in
+  [RESULTS.md](../RESULTS.md) was measured by the scripts in `tools/`. Accuracy measured on synthetic data
+  is an upper bound for real factory data.
+
+## Quick start
+
+Requires Python 3.11+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements.txt      # cadquery-ocp, numpy, pandas, openpyxl, rapidfuzz, scipy
+
+# demo on the bundled sample (synthetic, built from ABC parts)
+python -m part_audit scan data/sample/cad --erp data/sample/erp_export.csv \
+       --out out/sample_report.xlsx --ground-truth data/sample/ground_truth.csv
+
+# your own data
+python -m part_audit scan "D:/CAD/Projects" --erp erp_export.csv --out out/report.xlsx
+```
+
+Useful options:
+
+| Option | Meaning |
+|---|---|
+| `--workers N` | Number of geometry worker processes (default: all cores). |
+| `--timeout S` | Per-file geometry timeout in seconds (default 60). A file that hangs or crashes OpenCascade is killed and listed in `Errors_Skipped`. |
+| `--cache DIR` | Fingerprint cache, keyed by the file's SHA-256 (default: next to the report). Re-runs only process new or changed files. |
+| `--no-geometry` | Hashes and names only (L1+L2), no OpenCascade. |
+| `--no-shape-check` | Turns off the L3b surface comparison. |
+| `--thresholds file.json` | Overrides scoring thresholds (see `results/thresholds.json`). |
+| `--ground-truth gt.csv` | Adds a demo-only `Metrics` sheet and writes `*_metrics.json` and `*_eval_details.csv`. |
+| `--llm-endpoint URL` | Optional local LLM (e.g. Ollama) that writes advisory explanations for mapping rows. |
+| `--json file` | Writes pairs, groups and mappings as JSON. |
+
+The ERP CSV is read as UTF-8, UTF-16 or Windows-1255. Column names are detected in English or Hebrew
+(`part number`/`מק"ט`, `description`/`תיאור`, `unit`/`יחידה`, `material`/`חומר`, `supplier`/`ספק`).
+
+## The report
+
+| Sheet | Content |
+|---|---|
+| Summary | Counts of what was found, how to use the report, run parameters, timings and thresholds. |
+| Duplicate_Groups | Groups of files that are the same part: byte-identical, normalized STEP, geometric match, or unit-scaled match. Shows evidence and confidence for each file. |
+| Near_Duplicates | Small design changes (alert only, never merged), same-PN conflicts, identical geometry with different ERP material, and mirror images (left/right parts). |
+| Name_Inconsistencies | Same part under different PNs or descriptions, same PN used for different geometry, similar names on different parts, and file-name PNs spelled differently from the ERP. |
+| PartNumber_Mapping | `old_pn → proposed_pn` with group, reason, confidence and status "pending approval", plus empty **Approved (Y/N)** (with a drop-down) and **Reviewer notes** columns. |
+| ERP_vs_CAD | ERP items without a CAD file, CAD files without an ERP item, ERP items that duplicate another item's geometry, and ERP rows with the same description. |
+| Errors_Skipped | Unsupported formats (e.g. SLDPRT: export to STEP first), unreadable files, timeouts and crashes. |
+| Metrics | Demo only, when `--ground-truth` is given: per-type precision, recall and F1 against the targets. |
+
+## How it works
+
+| Layer | What it does | Module |
+|---|---|---|
+| L1 exact | SHA-256 of the file. A second "normalized" SHA-256 of the STEP DATA section ignores header, timestamps, names, comments, colours, whitespace, number formatting and entity numbering. | `hashes.py`, `stepfile.py` |
+| L2 names | Extracts and normalizes part numbers (case, separators, leading zeros). Removes noise words (old/final/copy/rev B/v2/(1), ישן/סופי/עותק). Translates Hebrew terms and abbreviations (BRKT, MTG…) to one English vocabulary. Matches Hebrew written in Latin letters ("tushevet") through a consonant key. Scores pairs with rapidfuzz. Numbers, dimensions and materials must agree. Descriptions shared by many part numbers count less. Candidates are generated by blocking, not all pairs. | `names.py` |
+| L3 geometry | OpenCascade (OCP) fingerprint in mm, using the file's declared unit: volume, area, principal moments of inertia, mesh-based bounding box in the principal frame, face/edge counts, surface-type counts and areas, unique underlying surfaces, and surface skewness. Small open "sheet" shells that some AP242 exporters add are ignored. Runs in worker processes with a per-file timeout, crash isolation and an SQLite cache. | `geometry.py` |
+| L3b shape check | For candidate pairs only. 4,096 surface samples per part, aligned in the principal frame (sign and axis ambiguities tried), with nearest-neighbour distances reported relative to the sampling noise. Rejects pairs whose properties match only by coincidence, and detects mirror images. This replaces the brief's suggested trimesh D2 / Hausdorff: it uses the median and 95th percentile of the aligned point-to-point distances (a robust Hausdorff variant), computed with a scipy KD-tree. D2 and trimesh are not used. | `shape.py` |
+| L4 LLM (optional, off) | Advisory one-sentence explanation of each mapping row from a local OpenAI-compatible server. Only names, PNs and the tool's own evidence are sent, never files. | `llm.py` |
+| L5 scoring | Classifies pairs as identical (merge candidate), near-identical (alert), conflict (same PN, different geometry), similar names only, or mirror. Then builds groups and proposes a canonical PN for each group. | `scoring.py` |
+
+Key rules:
+
+* **Identical.** Hash match. Or every property within 1e-6. Or within 1e-4 when the topology is the same,
+  or when the faces are only split differently (the same set of underlying planes, cylinders and so on,
+  which is typical of a re-export from another CAD system).
+* **Units.** A file declared in inches is converted by OpenCascade and matches exactly. A file whose numbers
+  were divided by 25.4 but still say "mm" (a unit error) matches only through an exact scale factor from a
+  short list (25.4, 10, 1000, 304.8…). Similar shapes at arbitrary scale are never matched.
+* **Near-identical.** Properties within 10%, a compatible topology, and L3b confirming that the surfaces
+  line up. These pairs are alerts and are never merged.
+* **Materials.** Identical geometry with different ERP materials is not merged. If identical geometry exists
+  with two different materials, a third copy with no material information is not merged either.
+* **Mirror images.** Volume, area and inertia cannot see handedness, so the tool uses the sign of the product
+  of the surface skewness along the principal axes (a pseudoscalar) and the L3b reflection test.
+* **Confidence.** These are heuristic evidence scores between 0 and 1, not calibrated probabilities. Their
+  measured precision is in the Metrics sheet and in RESULTS.md.
+
+## Measured results (held-out test set)
+
+Thresholds were tuned on a separate dev set (ABC chunk 0000) and frozen before the test set
+(ABC chunks 0001 and 0002) was built and scored. The full tables, hard negatives, dev numbers, real NIST
+files and timing are in [RESULTS.md](../RESULTS.md).
+
+<!-- results:start -->
+| Type | GT pairs | Found | Missed | Predicted | Wrong | Precision | Recall | F1 | Target | Met |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
+| A | 30 | 30 | 0 | 42 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| B | 30 | 30 | 0 | 40 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| C | 30 | 29 | 1 | 40 | 0 | 100.0% | 96.7% | 0.983 | P>=95% and R>=95% | yes |
+| D | 30 | 30 | 0 | 36 | 0 | 100.0% | 100.0% | 1.000 | P>=95% and R>=95% | yes |
+| E | 40 | 40 | 0 | 52 | 1 | 98.1% | 100.0% | 0.990 | R>=80% at P>=90% | yes |
+| F | 50 | 35 | 15 | 51 | 6 | 88.2% | 70.0% | 0.781 | F1>=0.85 | no |
+| F (full pipeline) | 50 | 50 | 0 | - | - | - | 100.0% | - | info | n/a |
+| False positives / flagged pairs | - | - | - | 234 | 2 | - | - | - | FP <= 2% | yes |
+
+*GT pairs / Found / Missed*: (base, variant) pairs, used for recall. *Predicted / Wrong*: every predicted pair that involves a file of that type, used for precision = (Predicted - Wrong) / Predicted. For F, 'predicted' means a name-layer link (score >= threshold). For the false-positive row, 'Predicted' is all flagged pairs (merge candidates + near-identical alerts).
+
+False positives on truly different parts: 2 of 234 flagged pairs = **0.85%** (target <= 2%).
+
+One algorithmic bug found during error analysis on this run (a rotated copy of a nearly axisymmetric part reported as a mirror image) was fixed afterwards without changing thresholds. With the fix, C recall is 100.0% (was 96.7%) and the flagged pairs went from 234 to 235 with 2 false positives (was 2); all other rows are unchanged (see RESULTS.md).
+
+
+Benchmark: 5000 random ABC STEP files (1536.7 MB, median 89.5 KB, max 2889.8 KB), 2 workers on a 2-vCPU cloud VM, cold cache: **20.29 min total** (0.243 s per file wall-clock). Geometry per file in a worker: mean 0.362 s, median 0.083 s, p90 1.028 s, max 25.04 s. Stages: scan + hashes 110.4 s, geometry (L3) 905.8 s, scoring incl. L3b 195.9 s, of which L3b 173.3 s (2677 L3b checks). Errors/skips: no usable geometry: 2. Peak RSS of the largest process: 591.7 MB.
+<!-- results:end -->
+
+## Reproducing the data and numbers
+
+```bash
+# 1. data (public): ABC STEP chunks 0000-0002 (MIT; model rights belong to their creators; internal use)
+#    list: https://deep-geometry.github.io/abc-dataset/data/step_v00.txt  (each chunk ~0.8-1.6 GB, 7z)
+#    NIST: https://www.nist.gov/document/nist-pmi-step-files  and  .../nist-ftc-ctc-pmi-cad-models
+python tools/extract_abc.py abc_0000_step_v00.7z RAW/abc0 --max-mb 3   # 5 KB-3 MB files only (needs 7-Zip)
+python tools/extract_abc.py abc_0001_step_v00.7z RAW/abc1 --max-mb 3
+python tools/extract_abc.py abc_0002_step_v00.7z RAW/abc2 --max-mb 3
+# 2. labeled sets (deterministic for a given seed)
+python tools/build_dataset.py --abc RAW/abc0 --n-base 250 --seed 11 --out data/dev \
+       --rates A=0.06,B=0.06,C=0.06,D=0.06,E=0.12,F=0.20
+python tools/build_dataset.py --abc RAW/abc1 RAW/abc2 --n-base 500 --seed 23 --out data/test \
+       --rates A=0.06,B=0.06,C=0.06,D=0.06,E=0.08,F=0.10
+# 3. tune on dev only, then score the test set once
+python tools/tune.py --data data/dev --out out/tune_dev.json
+python -m part_audit scan data/test/cad --erp data/test/erp_export.csv \
+       --ground-truth data/test/ground_truth.csv --out out/test_report.xlsx
+# 4. real STEP files, timing
+python tools/nist_check.py --nist RAW/nist/NIST-PMI-STEP-Files RAW/NIST-FTC-CTC-PMI-CAD-models --out out/nist
+python tools/feasibility.py --abc-dir RAW/abc0 --nist-dir RAW/nist --n 50 --out out/feasibility_l3.json
+python tools/bench.py --abc RAW/abc0 RAW/abc1 RAW/abc2 --n 5000 --out out/bench
+python tools/make_results.py --results results/
+```
+
+`ground_truth.csv` has the columns `file_id, group_id, type` (`base`, `A` to `F`, `HN_*`), plus
+`base_file_id, pn, variant, abc_source`. `hard_negative_pairs.csv` lists the pairs that must *not* be
+merged. Each set's `manifest.json` records every random choice.
+
+## Limitations and risks
+
+* **Synthetic data is an upper bound.** The planted variants come from OpenCascade operations. Real
+  exports from different CAD systems differ more. On the NIST files, different exports of the same test
+  case were reported as identical in some cases and as near-identical (alert) in others, never as
+  different parts. Two were not flagged at all. See RESULTS.md for the counts.
+* **Dev and test share the synthetic naming rules** (vocabulary, transliterations, PN schemes). Only the
+  CAD parts differ between them, so the name-layer (F) numbers are optimistic for real names.
+* **Generic descriptions.** A description like "HOUSING" shared by many part numbers cannot link a
+  renamed file to the right part by name alone. Such links are deliberately discounted, and geometry
+  decides.
+* **Mirror detection** needs a part with a clear handedness. Nearly symmetric parts give no signal, and the
+  dataset builder uses only clearly chiral parts (checked with exact point-to-B-rep distances).
+* **"Duplicate" also depends on material, finish, tolerance and treatment.** Only material (from the ERP or
+  the name) is checked. Anything else must be reviewed by a person.
+* **Native CAD files** (SLDPRT/SLDASM, CATPart, PRT…) are only listed. Export them to STEP first, which for
+  SOLIDWORKS needs a licence. Assemblies are fingerprinted as one shape. Very large or broken files are
+  isolated by the per-file timeout.
+* **Speed** was measured on a 2-vCPU cloud VM. The brief's 8-core target was not measured.
+
+## Data and licences
+
+* [ABC Dataset](https://deep-geometry.github.io/abc-dataset/): MIT licence for the dataset; the model rights
+  belong to their creators. Used here for internal demo purposes only. `data/sample` contains a few dozen
+  ABC parts.
+* [NIST MBE PMI test models](https://www.nist.gov/ctl/smart-connected-systems-division/smart-connected-manufacturing-systems-group/mbe-pmi-0):
+  NIST test cases, used without restriction (NIST asks for acknowledgement). They are not redistributed
+  here; `tools/nist_check.py` downloads nothing and works on files you fetch yourself.
+* GrabCAD and the Fusion 360 Gallery were not used.
+
+## Project layout
+
+```
+part_audit/   scan.py stepfile.py hashes.py names.py geometry.py shape.py scoring.py audit.py report.py
+              metrics.py llm.py cli.py
+tests/        tests for every layer (pytest)
+tools/        extract_abc.py build_dataset.py dataset_tasks.py cadops.py tune.py nist_check.py
+              feasibility.py bench.py make_results.py
+data/sample/  small demo set (cad/, erp_export.csv, ground_truth.csv)
+results/      measured JSON outputs used by RESULTS.md
+```
