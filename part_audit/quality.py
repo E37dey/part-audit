@@ -168,7 +168,7 @@ def erp_checks(parts: list, assemblies: list, erp_items: list, erp_bom: list, it
             ka, kb = material_key(r.material), material_key(" ".join(erp_mats))
             if materials_conflict(ka, kb):
                 out.append(issue("erp_material_mismatch", "high", [r.uid],
-                                 f"חומר ב-PDM: {r.material} | בתיאור ה-ERP: {' '.join(erp_mats)}",
+                                 f"חומר ב-PDM: {r.material} | תיאור ה-ERP: '{e.description}'",
                                  pdm=r.material, erp=" ".join(erp_mats)))
         if r.state_class == "obsolete" and e.active and e.stock_total > 0:
             out.append(issue("erp_status_mismatch", "medium", [r.uid],

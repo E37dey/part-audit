@@ -20,7 +20,7 @@ from .model import ErpItem, PartRecord, Snapshot, SourceInfo
 from .names import is_generic_product_name, parse_name, pn_core, pn_key
 from .quality import bom_checks, erp_checks, record_checks
 from .scan import FileRecord, read_step_record
-from .scoring import Item, Thresholds, build_pairs, duplicate_groups
+from .scoring import Item, Thresholds, build_pairs, duplicate_groups, finish_key, material_key
 from .stdparts import parse_spec
 
 Progress = Callable[[str, float, str], None]   # (stage, fraction 0..1, detail)
@@ -399,7 +399,10 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
         for i in range(len(rs)):
             for j in range(i + 1, len(rs)):
                 ra, rb = rs[i], rs[j]
-                m = compare_names(parse_name(ra.name, [ra.pn]), parse_name(rb.name, [rb.pn]))
+                na, nb = parse_name(ra.name, [ra.pn]), parse_name(rb.name, [rb.pn])
+                if not na.words or not nb.words:
+                    continue  # a name that is only the part number / file name says nothing about the part
+                m = compare_names(na, nb)
                 if m.desc_sim < 0.6:
                     names.append({"id": _gid("N", [ra.uid, rb.uid]), "type": "same_pn_different_name",
                                   "type_he": "אותו מק\"ט – שמות שונים", "uids": [ra.uid, rb.uid], "pn": ra.pn,
@@ -451,6 +454,10 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
                                            "active": e.active, "supplier": e.supplier, "family": e.family,
                                            "uom": e.uom},
             "spec": it.spec.label if it and it.spec else "", "group_id": group_of.get(r.uid),
+            # canonical keys, so the UI compares 'פלדה 12.9' with 'STEEL 12.9' and DIN 912 with ISO 4762 correctly
+            "material_key": material_key(r.material) if r.material else "", "finish_key": finish_key(r.finish),
+            "spec_key": "|".join((it.spec.kind, it.spec.size, it.spec.length, it.spec.grade, it.spec.seal))
+            if it and it.spec else "",
             "near_count": near_count.get(r.uid, 0), "issues": issue_count.get(r.uid, 0),
             "used_in": len(parents_of.get(r.uid, [])), "children": len(children_of.get(r.uid, [])),
         })

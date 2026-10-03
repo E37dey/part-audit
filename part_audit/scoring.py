@@ -248,6 +248,34 @@ def material_key(text: str) -> str:
     return " ".join(sorted(set(other + digits)))
 
 
+_FINISH_RULES = [  # (pattern, key) – first match wins; Hebrew and English spellings of the same finish
+    (r"anodi[sz]|אנודייז|אילגון", "anodize"),
+    (r"black\s*oxide|השחרה|blacken", "black-oxide"),
+    (r"zinc|galv|גלוון|מגולוו|אבץ", "zinc"),
+    (r"nickel|ניקל", "nickel"),
+    (r"chrom|כרום", "chrome"),
+    (r"powder|אבקה|אלקטרוסטט", "powder"),
+    (r"paint|צביעה|צבע", "paint"),
+    (r"none|ללא|raw|גולמי", "none"),
+]
+
+
+def finish_key(text: str) -> str:
+    """Canonical surface finish: 'BLACK OXIDE' and 'השחרה' -> 'black-oxide'; 'CLEAR ANODIZE' and 'אנודייז טבעי'
+    -> 'anodize clear'; 'PAINT RAL 7035' and 'צביעה RAL 7035' -> 'paint ral7035'."""
+    t = str(text or "").lower().strip()
+    if not t:
+        return ""
+    key = next((k for rx, k in _FINISH_RULES if re.search(rx, t)), "")
+    if not key:
+        return re.sub(r"\s+", " ", t)
+    if key == "anodize":
+        color = "black" if re.search(r"black|שחור", t) else "clear" if re.search(r"clear|natural|טבעי|שקוף", t) else ""
+        return f"anodize {color}".strip()
+    ral = re.search(r"ral\s*(\d{4})", t)
+    return f"{key} ral{ral.group(1)}" if ral else key
+
+
 def item_material(it: Item) -> tuple[str, str]:
     """(material key, label): PDM property, else the linked ERP row, else a material named in a name."""
     if str(getattr(it, "material", "") or "").strip():

@@ -71,10 +71,8 @@ def pair_reason_he(p, a=None, b=None) -> str:
                 bits.append("חלוקת הפאות שונה (יוצא ממערכת CAD אחרת או שורטט מחדש)")
         elif p.geo_relation == "near":
             shp = g.shape or {}
-            txt = f"גיאומטריה כמעט זהה: נפח {pct(g.d_volume)}, שטח פנים {pct(g.d_area)}"
-            if shp.get("p95_rel") is not None and shp.get("diag"):
-                txt += f", סטיית משטחים (95%) כ-{mm(shp['p95_rel'] * shp['diag'])}"
-            bits.append(txt)
+            bits.append(f"גיאומטריה כמעט זהה: הפרש נפח {pct(g.d_volume)}, שטח פנים {pct(g.d_area)}"
+                        + (", מספר פאות שונה" if not g.topo_same else ""))
         elif p.geo_relation == "mirror":
             bits.append("אותם ממדים, אבל תמונת מראה – גרסת ימין/שמאל")
         elif p.geo_relation == "different" and p.category in ("conflict", "name_similar"):
