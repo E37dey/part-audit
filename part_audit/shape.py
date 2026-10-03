@@ -152,9 +152,12 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
         d_ab = _NN(tb).query(pa)
         p50 = max(float(np.median(d_ab)), float(np.median(d_ba)))
         p95 = max(float(np.quantile(d_ab, 0.95)), float(np.quantile(d_ba, 0.95)))
+        p99 = max(float(np.quantile(d_ab, 0.99)), float(np.quantile(d_ba, 0.99)))
         res[f"{label}_excess50"] = p50 / n50
         res[f"{label}_excess95"] = p95 / n95
+        res[f"{label}_excess99"] = p99 / n95
         res[f"{label}_p95_rel"] = p95 / diag
+        res[f"{label}_t"] = [[float(x) for x in row] for row in t]
     res["excess50"] = res["proper_excess50"]
     res["excess95"] = res["proper_excess95"]
     res["p95_rel"] = res["proper_p95_rel"]
@@ -164,7 +167,12 @@ def compare_point_sets(pa: np.ndarray, pb: np.ndarray, eig_a, eig_b, area: float
     # trusted when the principal frame is unique (no rotation search that could miss the best angle)
     subtle = (mode == "unique" and res["improper_excess50"] < 1.2
               and res["proper_excess50"] - res["improper_excess50"] > 0.4)
-    res["mirror"] = bool(strong or subtle)
+    # small handed features (an asymmetric hole pattern on a symmetric body): the bulk fits either way, but
+    # the tail of the distances (the hole walls, ~1-5% of the surface) fits only the reflection
+    tail = (res["improper_excess95"] < 1.5 and res["improper_excess99"] < 2.0 and res["proper_excess99"] > 4.0
+            and res["improper_excess99"] < 0.35 * res["proper_excess99"])
+    res["mirror_tail"] = bool(tail)
+    res["mirror"] = bool(strong or subtle or tail)
     return res
 
 

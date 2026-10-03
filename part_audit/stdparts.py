@@ -30,6 +30,12 @@ STANDARDS = {
 }
 # words (already lower-cased, Hebrew without final forms) -> part type
 _TYPE_WORDS = [
+    # catalog components identified by a de-facto designation (checked before the generic words below)
+    (r"shaft\W*support|support\W+shaft|תושבת\s*ציר|(?<![a-z])sk\s?\d{2}(?![0-9])", "shaft_support"),
+    (r"linear\W*shaft|shaft\W+linear|ציר\s*ליניארי|ציר\s*לינארי", "linear_shaft"),
+    (r"collar|טבעת\s*נעילה", "shaft_collar"),
+    (r"level+ing\W*foot|foot\W+level+ing|רגלית\s*מתכווננת|רגלית\s*מתכוונננת", "leveling_foot"),
+    (r"conveyor\W*roller|roller\W+conveyor|גלגלת\s*מסוע", "conveyor_roller"),
     (r"socket\s*head|cap\s*screw|shcs|\bאלנ\b|ראש\s*גלילי", "shcs"),
     (r"countersunk|\bcsk\b|flat\s*head\s*socket|שקוע", "csk"),
     (r"set\W*screw|screw\W+set|grub|אל[-\s]?ראש|תולעת", "set_screw"),
@@ -47,6 +53,7 @@ _SCREW_TYPES = {"shcs", "csk", "set_screw", "set_screw_cup", "hex_screw", "hex_b
 _STD_RE = re.compile(r"\b(DIN|ISO|EN\s*ISO)\s*[-:]?\s*(\d{1,5})\b", re.I)
 _METRIC = re.compile(r"(?<![a-z0-9])m\s?(\d{1,2}(?:[.,]\d)?)(?:\s*[x×*]\s*(\d{1,3}(?:[.,]\d)?))?(?![0-9])", re.I)
 _DIMS = re.compile(r"(?<![0-9.])(\d{1,2}(?:[.,]\d)?)\s*[x×*]\s*(\d{1,3}(?:[.,]\d)?)(?:\s*[x×*]\s*(\d{1,3}))?(?![0-9])")
+_DIA_LEN = re.compile(r"(?:ø|⌀|(?<![a-z])d)?\s?(\d{1,3}(?:[.,]\d)?)\s*[x×*]\s*(\d{2,4})(?![0-9])")
 _BEARING = re.compile(r"(?<![0-9])((?:6|16|60|62|63|64|618|619)\d{2})(?:[\s-]*(2rs1?|2rsh|2rz|2z|zz|rs1?|z|rz|n|nr))?"
                       r"(?![0-9a-z])", re.I)
 _GRADE = re.compile(r"(?<![0-9.])(4\.6|5\.6|8\.8|10\.9|12\.9)(?![0-9])|(?<![a-z0-9])(a[24])(?:[\s-]*(?:70|80))?(?![0-9a-z])",
@@ -144,6 +151,22 @@ def parse_spec(*texts: str) -> StdSpec | None:
         if not m or not m.group(3):
             return None
         return StdSpec("key", f"{_num(m.group(1))}x{_num(m.group(2))}", _num(m.group(3)), standard, "", "")
+    if kind in ("linear_shaft", "conveyor_roller"):
+        m = _DIA_LEN.search(t)
+        if not m:
+            return None
+        return StdSpec(kind, f"D{_num(m.group(1))}", _num(m.group(2)), "", "", "")
+    if kind == "shaft_support":
+        m = re.search(r"(?<![a-z])(sk|shf)\s?(\d{2})(?![0-9])", t)
+        return StdSpec(kind, f"{m.group(1).upper()}{m.group(2)}", "", "", "", "") if m else None
+    if kind == "shaft_collar":
+        m = re.search(r"(?:ø|⌀|(?<![a-z])d)\s?(\d{1,3})(?![0-9x])", t)
+        return StdSpec(kind, f"D{m.group(1)}", "", "", "", "") if m else None
+    if kind == "leveling_foot":
+        m = _METRIC.search(t)
+        if not m or not m.group(2):
+            return None
+        return StdSpec(kind, f"M{_num(m.group(1))}", _num(m.group(2)), "", "", "")
     return None
 
 

@@ -249,7 +249,7 @@ def router(root: str) -> APIRouter:
                     crev = d().rev_of_rid.get(b["child"])
                     if not crev:
                         continue
-                    bl = f"SR::N::BOMLine..{crev}..{i}"
+                    bl = f"SR::N::BOMLine..{crev}..{rev}..{i}"
                     kids.append({"bomLine": _ref(bl, "BOMLine"), "itemRevOfBOMLine": _ref(crev, "ItemRevision")})
                     mos[bl] = {"objectID": bl, "uid": bl, "className": "BOMLine", "type": "BOMLine",
                                "props": {"bl_quantity": _prop(str(b["qty"])), "bl_item_item_id": _prop(

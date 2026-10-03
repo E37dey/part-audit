@@ -211,13 +211,16 @@ def geometry_candidates(items: dict[str, Item], th: Thresholds) -> dict[tuple[st
 # --------------------------------------------------------------------------- ERP attributes
 
 _MATERIAL_SYNONYMS = {
-    "aluminium": "aluminum", "alu": "aluminum", "al": "aluminum", "alum": "aluminum", "אלומיניום": "aluminum",
+    "aluminium": "aluminum", "aluminum": "aluminum", "alu": "aluminum", "al": "aluminum", "alum": "aluminum",
+    "אלומיניום": "aluminum",
     "אלומיניון": "aluminum", "steel": "steel", "st": "steel", "stl": "steel", "פלדה": "steel", "ss": "stainless",
     "inox": "stainless", "stainless": "stainless", "נירוסטה": "stainless", "brass": "brass", "פליז": "brass",
     "copper": "copper", "cu": "copper", "נחושת": "copper", "delrin": "pom", "acetal": "pom", "pom": "pom",
     "דלרין": "pom", "אצטל": "pom", "nylon": "nylon", "pa6": "nylon", "ניילון": "nylon", "abs": "abs",
     "peek": "peek", "pvc": "pvc", "polycarbonate": "pc", "pc": "pc", "titanium": "titanium", "ti": "titanium",
     "טיטניום": "titanium", "plastic": "plastic", "פלסטיק": "plastic", "rubber": "rubber", "גומי": "rubber",
+    "bronze": "bronze", "ברונזה": "bronze", "galv": "steel", "galvanized": "steel", "מגולוון": "steel",
+    "מגולוונת": "steel", "dx51d": "steel", "פלדת": "steel", "פח": "steel",
 }
 
 
@@ -402,6 +405,16 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
         p.reason = ("same size and properties but mirror image (left/right-hand version?) - different parts; "
                     + ", ".join(how))
 
+    # ---- left/right versions named as such are never merged automatically
+    if p.geo_relation in ("identical", "unit_scaled", "near") and _opposite_sides(a, b):
+        if p.geo_relation != "mirror":
+            p.category, p.merge_ok = "mirror", False
+            p.confidence = max(p.confidence, 0.8)
+            p.reason = ("names say left/right versions (the difference is too small for the geometry check to "
+                        "confirm the mirror image) - different parts, do not merge" + (f"; {p.reason}" if p.reason else ""))
+            if name_txt:
+                p.reason += f"; {name_txt}"
+            return p
     # ---- standard parts: the designation decides what 'same item' means
     sa, sb = getattr(a, "spec", None), getattr(b, "spec", None)
     p.spec_relation, p.spec_note = compare_specs(sa, sb)
@@ -413,18 +426,23 @@ def classify(p: Pair, a: Item, b: Item, th: Thresholds) -> Pair:
         if name_txt:
             p.reason += f"; {name_txt}"
         return p
-    if p.spec_relation == "same" and p.geo_relation in ("identical", "unit_scaled", "near", "unknown"):
+    lib_detail = (p.spec_relation == "same" and p.geo_relation == "different" and g is not None
+                  and g.d_bbox <= 0.05)  # same designation, same envelope: a different CAD library's detail
+    if p.spec_relation == "same" and (p.geo_relation in ("identical", "unit_scaled", "near", "unknown") or lib_detail):
         p.attr_issues = erp_attribute_conflicts(a, b)
         label = sa.label if sa else ""
         geo_txt = {"identical": "identical geometry", "unit_scaled": "identical geometry up to a unit factor",
                    "near": "small geometry differences (different CAD library detail)",
-                   "unknown": "geometry not compared"}[p.geo_relation]
+                   "unknown": "geometry not compared",
+                   "different": "same envelope but the model details differ more than usual - check the model"
+                   }[p.geo_relation]
         if p.attr_issues:
             p.category, p.merge_ok = "identical_attr_conflict", False
             p.reason = f"same standard part {label} but ERP " + "; ".join(p.attr_issues) + " - review"
         else:
             p.category, p.merge_ok = "standard_part", True
-            p.confidence = {"identical": 0.97, "unit_scaled": 0.9, "near": 0.9, "unknown": 0.8}[p.geo_relation]
+            p.confidence = {"identical": 0.97, "unit_scaled": 0.9, "near": 0.9, "unknown": 0.8,
+                            "different": 0.75}[p.geo_relation]
             p.reason = (f"same standard part {label}" + (f" ({p.spec_note})" if p.spec_note else "") + f"; {geo_txt}"
                         + (f"; {p.reason}" if p.reason and p.geo_relation != "identical" else ""))
         if name_txt:
@@ -531,7 +549,8 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
         if use_geometry and not p.l1:
             p.geo = compare_geometry(ia.fp, ib.fp, th, scales.get((a, b), 1.0))
     if shape_check is not None:
-        jobs = [(items[a], items[b], p.geo) for (a, b), p in ordered if needs_shape_check(p.geo)]
+        jobs = [(items[a], items[b], p.geo) for (a, b), p in ordered if needs_shape_check(p.geo)
+                and not compare_specs(getattr(items[a], "spec", None), getattr(items[b], "spec", None))[0]]
         if hasattr(shape_check, "prefetch"):
             shape_check.prefetch(jobs)  # parallel, results are kept by the checker
         for ia, ib, geo in jobs:
@@ -542,6 +561,21 @@ def build_pairs(items: dict[str, Item], th: Thresholds, use_geometry: bool = Tru
             out.append(p)
     enforce_material_consistency(out, items)
     return out
+
+
+def _sides(it: Item) -> set:
+    """Left/right words in the item's own names (not the linked ERP text)."""
+    out = set()
+    labels = it.source_labels or [""] * len(it.sources)
+    for label, src in zip(labels, it.sources):
+        if label != "erp":
+            out |= {w for w in src.words if w in ("left", "right")}
+    return out
+
+
+def _opposite_sides(a: Item, b: Item) -> bool:
+    sa, sb = _sides(a), _sides(b)
+    return len(sa) == 1 and len(sb) == 1 and sa != sb
 
 
 def needs_shape_check(g: "GeoMatch | None") -> bool:

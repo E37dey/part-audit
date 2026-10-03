@@ -32,7 +32,7 @@ from rapidfuzz.distance import OSA
 HEBREW_TERMS = {
     "תושבת": "bracket", "מתלה": "hanger", "זוויתן": "angle", "זווית": "angle", "פלטה": "plate", "לוחית": "plate",
     "לוח": "panel", "פח": "sheet", "כיסוי": "cover", "מכסה": "cover", "בית": "housing", "גוף": "body",
-    "מסגרת": "frame", "שלדה": "chassis", "ציר": "hinge", "גל": "shaft", "סרן": "axle", "פין": "pin",
+    "מסגרת": "frame", "שלדה": "chassis", "ציר": "shaft", "גל": "shaft", "סרן": "axle", "פין": "pin",
     "בורג": "screw", "אום": "nut", "דסקית": "washer", "טבעת": "ring", "אטם": "gasket", "קפיץ": "spring",
     "מסב": "bearing", "מיסב": "bearing", "תותב": "bushing", "שרוול": "sleeve", "מרווח": "spacer",
     "ספייסר": "spacer", "מתאם": "adapter", "מחבר": "connector", "מצמד": "coupling", "גלגל": "wheel",
@@ -52,9 +52,19 @@ HEBREW_TERMS = {
     "מעצור": "stop", "בולם": "damper", "מקבע": "fixture", "מתקן": "fixture", "מגש": "tray", "מדף": "shelf",
     "תעלה": "channel", "מעטפת": "casing", "להב": "blade", "פיה": "nozzle", "נחיר": "nozzle", "בלוק": "block",
     "גוש": "block", "חיזוק": "stiffener", "מחזק": "stiffener", "שן": "tooth", "הברגה": "thread",
+    # machine-shop / standard-part vocabulary (v2)
+    "פלטת": "plate", "זוויתית": "angle", "זוויתי": "angle", "דיסקית": "washer", "שטוחה": "flat",
+    "מתכווננת": "adjustable", "מתכוונן": "adjustable", "הנעה": "drive", "אלן": "socket", "ראש": "head",
+    "גלילי": "cap", "מכוון": "dowel", "שגם": "key", "כדורי": "ball", "תוף": "drum", "זנב": "tail", "סרק": "idler",
+    "מתיחה": "tensioner", "העברה": "transmission", "הידוק": "clamp", "מוקשה": "hardened", "ליניארי": "linear",
+    "לינארי": "linear", "מסוע": "conveyor", "רגלית": "foot", "שקוע": "countersunk", "קפיצית": "spring",
+    "יחידת": "unit", "יחידה": "unit", "פיקס": "fixture", "שילוט": "label", "הגנה": "guard", "כיוון": "adjusting",
+    "כיוונון": "adjusting", "עליונה": "upper", "תחתונה": "lower", "חיבור": "connection", "תושבות": "bracket",
 }
 # Multi-word Hebrew phrases handled before tokenization.
-HEBREW_PHRASES = {"גלגל שיניים": "gear", "גלגל שינים": "gear", "תת מכלול": "subassembly", "מוט הברגה": "threaded rod"}
+HEBREW_PHRASES = {"גלגל שיניים": "gear", "גלגל שינים": "gear", "תת מכלול": "subassembly", "מוט הברגה": "threaded rod",
+                  "ציר דלת": "hinge", "אל-ראש": "set", "אל ראש": "set", "טבעת נעילה": "collar",
+                  "גלגלת מסוע": "conveyor roller"}
 
 ABBREVIATIONS = {
     "brkt": "bracket", "bkt": "bracket", "brk": "bracket", "brack": "bracket", "mtg": "mount", "mnt": "mount",
@@ -76,6 +86,7 @@ SYNONYMS = {
     "adaptor": "adapter", "bushes": "bushing", "bush": "bushing", "stiffner": "stiffener", "tubing": "tube",
     "casing": "casing", "spacers": "spacer", "brackets": "bracket", "plates": "plate", "hinges": "hinge",
     "top": "upper", "bottom": "lower", "lefthand": "left", "righthand": "right",
+    "flanged": "flange", "leveling": "adjustable", "levelling": "adjustable",
 }
 NOISE_WORDS = {
     "old", "new", "final", "copy", "rev", "revision", "ver", "version", "draft", "backup", "bak", "tmp", "temp",
@@ -132,6 +143,15 @@ _PN = re.compile(
     r"((?<![A-Za-z0-9])[A-Za-z]{1,4}[._-]?\d+(?:[._-]\d+)*(?:[._-][A-Za-z](?![A-Za-z]))?(?![0-9])"
     r"|(?<![0-9])\d+(?:[._-]\d+)*(?:[._-][A-Za-z](?![A-Za-z]))?(?![0-9]))")
 _DATE = re.compile(r"^(?:19|20)\d\d(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])$")
+# standard references (DIN 912, ISO 4762, EN 10025) describe a specification, not an item number
+_STD_REF = re.compile(r"(?<![A-Za-z])(?:DIN|ISO|EN|ASME|ANSI|JIS|BS|UNI|NF)\s*[-:]?\s*\d+(?:[-.]\d+)?", re.I)
+# material grade after a material word: 'אלומיניום 6061-T6', 'stainless 316', 'steel S235'
+_MAT_GRADE = re.compile(r"(?:אלומיניומ|אלומיניונ|aluminium|aluminum|alu|al|נירוסטה|stainless|aisi|ss|פלדה|פלדת|steel|st)"
+                        r"\s*[-_]?\s*[a-z]?\d{2,4}(?:-?t\d+)?(?![0-9])", re.I)
+_BEARING_WORD = re.compile(r"bearing|מסב|מיסב", re.I)
+_BEARING_CODE = re.compile(r"(?<![0-9])(?:6|16|60|62|63|64)\d{2}(?:[\s-]*(?:2rs1?|2rsh|2rz|2z|zz|rs1?|z|rz))?(?![0-9])",
+                           re.I)
+_LENGTH = re.compile(r"(?<![A-Za-z])L\s*=\s*\d+", re.I)
 
 
 def _strip_heb(s: str) -> str:
@@ -324,7 +344,12 @@ def parse_name(text: str, known_pns: list[str] | None = None) -> NameParts:
     # camelCase / letter-digit boundaries in Latin words: "MountingBracket" -> "Mounting Bracket"
     s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)
     s, materials = _material_codes(s)  # before PN extraction: AL6061 is a material, not a part number
-    pns = extract_part_numbers(s)
+    s = _STD_REF.sub(" ", s)           # the standard-part rule (stdparts.py) reads these separately
+    s = re.sub(r"(?<=[1-7]\d{3})-?T\d{1,3}(?![0-9A-Za-z])", " ", s, flags=re.I)  # aluminium temper (6061-T6)
+    s_pn = _LENGTH.sub(" ", _MAT_GRADE.sub(" ", s))
+    if _BEARING_WORD.search(s_pn):
+        s_pn = _BEARING_CODE.sub(" ", s_pn)
+    pns = extract_part_numbers(s_pn)
     if known_pns:
         pns += [k for k in known_pns if k not in pns]
     for pn in pns:  # remove PN text so its digits do not become description numbers

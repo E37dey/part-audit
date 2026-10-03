@@ -367,7 +367,7 @@ class Factory:
         for d in rng.sample(cands, 22):
             ov, why = near_overrides(d, rng)
             s = owner_of[d.did] if rng.random() < 0.55 else rng.choice(PDM_SITES)
-            gt = f"{d.did}~near"
+            gt = f"{d.did}~" + _okey(ov)
             self.add_record(s, d, variant="near", over=ov, gt=gt, geom_note=why)
             self.truth.append({"type": "near", "did": d.did, "site": s, "change": why})
         # mirror (left-hand) versions of chiral brackets: legitimate distinct parts
@@ -412,7 +412,7 @@ class Factory:
                     kind = "reexport"
                 else:
                     over, note = r
-                    gt = f"{d.did}~arch_near"
+                    gt = f"{d.did}~" + _okey(over)
             if kind == "oldrev":
                 r = oldrev_overrides(d, rng)
                 if r is None:
@@ -509,10 +509,12 @@ class Factory:
                 top = self.add_record(site, None, kind="assembly", name=top_name, desc=top_name, name_en=top_name,
                                       variant="assembly", state="released",
                                       extra={"family": "assembly", "make_buy": "make", "material": ""})
+                top_released = rng.random() < 0.75
+                top["state_class"] = "released" if top_released else "in_work"
                 for sub_name in subs:
                     sub = self.add_record(site, None, kind="assembly", name=sub_name, desc=f"{sub_name} – {top_name}",
                                           name_en=sub_name, variant="assembly",
-                                          state="released" if rng.random() < 0.8 else "in_work",
+                                          state="released" if (top_released or rng.random() < 0.5) else "in_work",
                                           extra={"family": "assembly", "make_buy": "make", "material": ""})
                     for r in rng.sample(make, min(len(make), rng.randint(3, 7))):
                         sub["bom"].append({"child": r["rid"], "qty": rng.choice([1, 1, 1, 2, 2, 4])})
@@ -520,6 +522,9 @@ class Factory:
                         q = rng.choice([2, 4, 4, 6, 8, 12]) if r["family"] in FASTENER_FAMS else rng.choice([1, 2, 2, 4])
                         sub["bom"].append({"child": r["rid"], "qty": q})
                     top["bom"].append({"child": sub["rid"], "qty": 4 if "רגל" in sub_name else 1})
+                    if sub["state_class"] == "released":  # a released assembly normally uses released parts only
+                        for line in sub["bom"]:
+                            self.by_rid[line["child"]]["state_class"] = "released"
 
     def plan_quality(self) -> None:
         """STEP availability, mass property, and planted data-quality issues."""
@@ -709,7 +714,7 @@ class Factory:
             [r for r in self.records if r["kind"] == "part" and r["make_buy"] == "make" and r["state_class"] == "released"
              and r["site"] != "archive" and r["variant"] not in ("nist",)], 8))
         for r in self.records:
-            if r["site"] == "archive" or r["variant"] == "nist":
+            if r["site"] == "archive":
                 continue
             in_erp = r["make_buy"] == "buy" or r["state_class"] in ("released", "obsolete")
             if r["kind"] == "assembly":
@@ -721,10 +726,14 @@ class Factory:
                 continue
             d = self.designs.get(r["did"]) if r["did"] else None
             pn = r["pn"]
+            if r["variant"] == "nist":
+                cost_nist = 850.0
             if "pn_format" in r["plants"]:
                 pn = r.get("pn_original", pn)
             he_desc = (d.he if d else r["name"]) if (r["site"] in ("center", "south") or rng.random() < 0.5) else r["name"]
-            cost = (d.cost if d else 0.0) * rng.uniform(0.9, 1.15)
+            if r["variant"] in ("mirror", "saveas"):
+                he_desc = r["name"]
+            cost = (d.cost if d else (cost_nist if r["variant"] == "nist" else 0.0)) * rng.uniform(0.9, 1.15)
             if r["kind"] == "assembly":
                 cost = 0.0
             fam = r["family"]
@@ -751,17 +760,13 @@ class Factory:
         # planted description and material mismatches between PDM and ERP
         cand = [i for i in items.values() if self.by_rid[i["rid"]]["kind"] == "part"
                 and self.by_rid[i["rid"]]["make_buy"] == "make"]
-        for i in rng.sample(cand, 9):
-            r = self.by_rid[i["rid"]]
-            swaps = [("פלטת", "לוחית"), ("תושבת", "מחזיק"), ("ציר", "גל"), ("מרווח", "ספייסר"), ("תותב", "שרוול"),
-                     ("גלגלת", "פולי"), ("אוגן", "פלנג'"), ("מכסה", "כיסוי"), ("בית מסב", "תושבת מסב")]
-            for a, b in swaps:
-                if a in i["description"]:
-                    i["description"] = i["description"].replace(a, b, 1)
-                    break
-            else:
-                i["description"] = i["description"] + " (ישן)"
-            r["plants"].append("erp_description_differs")
+        picks = rng.sample(cand, 10)
+        for i, j in zip(picks[0::2], picks[1::2]):  # copy/paste error: two items got each other's description
+            if self.by_rid[i["rid"]]["family"] == self.by_rid[j["rid"]]["family"]:
+                continue
+            i["description"], j["description"] = j["description"], i["description"]
+            self.by_rid[i["rid"]]["plants"].append("erp_description_differs")
+            self.by_rid[j["rid"]]["plants"].append("erp_description_differs")
         for i in rng.sample([i for i in cand if C.MATERIALS[self.by_rid[i["rid"]]["material"]][0].split()[0]
                              in ("אלומיניום", "פלדה")], 5):
             r = self.by_rid[i["rid"]]
@@ -823,6 +828,12 @@ class Factory:
             counts[(r["site"], r["kind"])] += 1
         print(json.dumps({f"{k[0]}/{k[1]}": v for k, v in sorted(counts.items())}, ensure_ascii=False))
         print(f"ERP items: {len(erp['items'])}, BOM lines: {len(erp['bom'])}, truth entries: {len(self.truth)}")
+
+
+def _okey(over: dict) -> str:
+    """Ground-truth key of a geometry change: two records with the same change are the same part."""
+    import hashlib
+    return hashlib.sha1(json.dumps(over, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
 
 def _jsonable(x):
