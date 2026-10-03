@@ -113,7 +113,7 @@ function form(k, s, refresh) {
     if (f.type === "password") input = `<input type="password" id="${id}" value="${esc(v)}" autocomplete="new-password" dir="ltr">`;
     else if (f.type === "number") input = `<input type="number" id="${id}" value="${esc(v)}" dir="ltr">`;
     else input = `<input type="text" id="${id}" value="${esc(v)}" dir="${/url|path|root|host|server/.test(f.name) ? "ltr" : "auto"}">`;
-    const up = f.type === "path" && k.kind === "erp_file" ? `<input type="file" id="${id}-up" accept=".xlsx,.xls,.csv">` : "";
+    const up = f.type === "path" && k.kind === "erp_file" ? `<input type="file" id="${id}-up" accept=".xlsx,.csv">` : "";
     return `<div class="field ${f.type === "path" || /url|root/.test(f.name) ? "full" : ""}"><label for="${id}">${esc(f.label)}${f.required ? " *" : ""}</label>${input}${up}${f.help ? `<span class="help">${esc(f.help)}</span>` : ""}</div>`;
   };
   const body = `<div class="stack" style="gap:16px">

@@ -1,8 +1,12 @@
-cadquery-ocp>=7.7
-numpy>=1.24
-pandas>=2.0
+# PartAudit runtime (the start scripts install these into a private environment)
+cadquery-ocp-novtk==7.9.3.1.1
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
 openpyxl>=3.1
-rapidfuzz>=3.0
-scipy>=1.10
-# tests
-pytest>=7
+rapidfuzz>=3.5
+httpx>=0.27
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+keyring>=24

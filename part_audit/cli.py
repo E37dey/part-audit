@@ -93,6 +93,27 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _running_here(url: str) -> bool:
+    """True if a PartAudit app already answers on this address."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url + "/api/status", timeout=1.5) as r:
+            return "demo_available" in json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return False
+
+
+def _port_free(host: str, port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
 def run_app(args) -> int:
     import threading
     import webbrowser
@@ -100,12 +121,23 @@ def run_app(args) -> int:
     import uvicorn
 
     from .server.app import create_app
-    url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '') else args.host}:{args.port}"
+    host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+    port = args.port
+    if _running_here(f"http://{host}:{port}"):
+        print(f"PartAudit already runs at http://{host}:{port} - opening it")
+        if not args.no_browser:
+            webbrowser.open(f"http://{host}:{port}")
+        return 0
+    for p in range(args.port, args.port + 30):
+        if _port_free(args.host, p):
+            port = p
+            break
+    url = f"http://{host}:{port}"
     app = create_app(args.workspace, demo=not args.no_demo, base_url=url)
     print(f"PartAudit is running: {url}  (workspace: {args.workspace})  - close this window to stop")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(app, host=args.host, port=port, log_level="warning")
     return 0
 
 

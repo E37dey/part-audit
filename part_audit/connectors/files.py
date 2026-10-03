@@ -114,7 +114,9 @@ def _map_columns(cols, spec: dict) -> dict:
 
 def read_table(path: Path, sheet: str | None = None):
     import pandas as pd
-    if path.suffix.lower() in (".xlsx", ".xlsm", ".xls"):
+    if path.suffix.lower() == ".xls":
+        raise ValueError("קובץ Excel בפורמט הישן (.xls) – שמרו אותו מחדש כ-.xlsx או כ-CSV")
+    if path.suffix.lower() in (".xlsx", ".xlsm"):
         xl = pd.read_excel(path, sheet_name=None, dtype=str)
         return {k: v.fillna("") for k, v in xl.items()}
     from ..scan import load_erp  # CSV with encoding detection (Hebrew code pages)

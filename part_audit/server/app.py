@@ -71,6 +71,20 @@ class Jobs:
         return None
 
 
+def _rebase_demo_sources(store: "Store", base_url: str) -> None:
+    """The demo 'systems' run inside this app: point saved demo sources at the address the app runs on now
+    (another port than last time, for example)."""
+    import re
+    base = base_url.rstrip("/")
+    for s in store.list_sources(with_secrets=True):
+        if not s["simulated"]:
+            continue
+        cfg = {k: (re.sub(r"^https?://(127\.0\.0\.1|localhost):\d+", base, v) if isinstance(v, str) else v)
+               for k, v in s["config"].items()}
+        if cfg != s["config"]:
+            store.save_source({**s, "config": cfg})
+
+
 def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR, demo: bool = True,
                base_url: str = "http://127.0.0.1:8765") -> FastAPI:
     store = Store(workspace)
@@ -83,6 +97,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     if demo_available:
         from ..simulators import mount_simulators
         mount_simulators(app, factory_dir)
+        _rebase_demo_sources(store, base_url)
 
     from ..viewer import MeshCache, align_meshes, compare_bytes, compare_meshes
     meshes = MeshCache(store.ws / "cache" / "meshes")
@@ -200,8 +215,8 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     @app.post("/api/upload")
     async def upload(file: UploadFile = File(...)):
         name = Path(file.filename or "upload").name
-        if Path(name).suffix.lower() not in (".xlsx", ".xlsm", ".xls", ".csv", ".txt"):
-            raise HTTPException(400, "ניתן להעלות קבצי Excel או CSV בלבד")
+        if Path(name).suffix.lower() not in (".xlsx", ".xlsm", ".csv", ".txt"):
+            raise HTTPException(400, "ניתן להעלות קבצי Excel (.xlsx) או CSV בלבד")
         dest = store.ws / "uploads" / f"{time.strftime('%Y%m%d-%H%M%S')}_{name}"
         dest.write_bytes(await file.read())
         return {"path": str(dest), "name": name}

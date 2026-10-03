@@ -4,27 +4,39 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "part-audit"
-version = "0.1.0"
-description = "Local-only CAD/ERP part data audit demo: duplicate parts, near-duplicates and part-number inconsistencies"
+version = "2.0.0"
+description = "PartAudit: local, read-only audit of engineering part data across PDM/PLM systems and the ERP, with a Hebrew web UI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "cadquery-ocp>=7.7",   # OpenCascade bindings (STEP reading, geometry properties)
-    "numpy>=1.24",
-    "pandas>=2.0",
-    "openpyxl>=3.1",
-    "rapidfuzz>=3.0",
-    "scipy>=1.10",        # KD-tree for the L3b surface check (numpy fallback exists)
+    "cadquery-ocp-novtk==7.9.3.1.1",  # OpenCascade: STEP reading and geometry (the build without the VTK viewer libs)
+    "numpy>=1.26",
+    "scipy>=1.11",                    # KD-trees for surface comparison
+    "pandas>=2.1",                    # ERP export files (xlsx / csv)
+    "openpyxl>=3.1",                  # Excel report
+    "rapidfuzz>=3.5",                 # name similarity
+    "httpx>=0.27",                    # read-only HTTP to PDM/PLM/ERP APIs
+    "fastapi>=0.110",                 # local web app (127.0.0.1 only)
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",        # ERP file upload in the app
+    "keyring>=24",                    # passwords in Windows Credential Manager / macOS Keychain
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+solidworks-com = ["pywin32>=306; sys_platform == 'win32'"]   # SOLIDWORKS PDM through the installed client (COM)
+# Rebuilding the demo factory (tools/factory) needs CadQuery, which brings the VTK build of OCP.
+# Use a separate environment for it: it cannot share one with cadquery-ocp-novtk.
+factory = ["cadquery>=2.4"]
 
 [project.scripts]
 part-audit = "part_audit.cli:main"
 
-[tool.setuptools]
-packages = ["part_audit"]
+[tool.setuptools.packages.find]
+include = ["part_audit*"]
+
+[tool.setuptools.package-data]
+part_audit = ["ui/*.html", "ui/css/*", "ui/js/*.js", "ui/js/pages/*.js", "ui/vendor/*", "ui/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
