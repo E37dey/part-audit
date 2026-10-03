@@ -42,7 +42,7 @@ export async function render({ el, setTitle, go, refreshStatus, state }) {
 function diagram() {
   const sys = [["SW", "#c8102e", "SOLIDWORKS PDM"], ["AV", "#0696d7", "Autodesk Vault"], ["WC", "#3a8d3a", "Windchill"],
     ["TC", "#00557f", "Teamcenter"], ["FS", "#6b7280", "תיקיית רשת"], ["PR", "#5b3fb8", "Priority / SAP"]];
-  return `<svg viewBox="0 0 360 300" width="100%" style="max-width:420px;display:block;margin:auto" role="img" aria-label="מערכות מתחברות לבקרה אחת">
+  return `<svg viewBox="0 0 360 300" width="100%" style="max-width:420px;display:block;margin:auto;direction:ltr" role="img" aria-label="מערכות מתחברות לבקרה אחת">
     ${sys.map(([c, col, label], i) => {
       const y = 22 + i * 46;
       return `<g><rect x="230" y="${y}" width="120" height="34" rx="6" fill="var(--surface)" stroke="var(--line)"/>

@@ -331,7 +331,7 @@ table.t td.sel-col, table.t th.sel-col { width: 34px; }
   .nav a { padding: 6px 8px; font-size: 0.85rem; }
   .nav-sep, .rail-foot { display: none; }
   .content { padding: 16px; }
-  .topbar { padding: 10px 16px; }
+  .topbar { padding: 10px 16px; position: static; }
   .grid-2, .grid-3, .form { grid-template-columns: minmax(0, 1fr); }
   .bar-row { grid-template-columns: minmax(80px, 38%) minmax(0, 1fr) 46px; }
 }
