@@ -123,6 +123,11 @@ def _samples(v, t, w, n=4096, seed=7):
 
 def point_triangle_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
     """Exact distance from points p[i] to triangles (a[i], b[i], c[i]) (vectorized, Ericson's method)."""
+    return point_triangle_closest(p, a, b, c)[0]
+
+
+def point_triangle_closest(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(distance, closest point) from points p[i] to triangles (a[i], b[i], c[i])."""
     ab, ac, ap = b - a, c - a, p - a
     d1, d2 = (ab * ap).sum(1), (ac * ap).sum(1)
     bp = p - b
@@ -133,11 +138,13 @@ def point_triangle_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.n
     vb = d5 * d2 - d1 * d6
     vc = d1 * d4 - d3 * d2
     out = np.empty(len(p))
+    qs = np.empty_like(p, dtype=np.float64)
     done = np.zeros(len(p), bool)
 
     def take(mask, q):
         m = mask & ~done
         out[m] = np.linalg.norm(p[m] - q[m], axis=1)
+        qs[m] = q[m]
         done[m] = True
     take((d1 <= 0) & (d2 <= 0), a)
     take((d3 >= 0) & (d4 <= d3), b)
@@ -154,7 +161,7 @@ def point_triangle_distance(p: np.ndarray, a: np.ndarray, b: np.ndarray, c: np.n
         v_ = vb * denom
         w_ = vc * denom
         take(np.ones(len(p), bool), a + ab * v_[:, None] + ac * w_[:, None])
-    return out
+    return out, qs
 
 
 def subdivide(v: np.ndarray, t: np.ndarray, max_edge: float, max_tris: int = 400_000) -> tuple[np.ndarray, np.ndarray]:
@@ -191,13 +198,24 @@ class MeshDistance:
         self.k = min(k, len(self.t))
 
     def __call__(self, points: np.ndarray) -> np.ndarray:
-        _, idx = self.tree.query(points, k=self.k)
-        idx = np.asarray(idx).reshape(len(points), self.k)
-        best = np.full(len(points), np.inf)
-        for j in range(self.k):
-            tj = self.tri[idx[:, j]]
-            best = np.minimum(best, point_triangle_distance(points, tj[:, 0], tj[:, 1], tj[:, 2]))
-        return best
+        return self.closest(points)[0]
+
+    def closest(self, points: np.ndarray, chunk: int = 16_000) -> tuple[np.ndarray, np.ndarray]:
+        points = np.asarray(points, np.float64)
+        n = len(points)
+        best = np.empty(n)
+        q = np.empty((n, 3))
+        for s in range(0, n, chunk):
+            pts = points[s:s + chunk]
+            m = len(pts)
+            _, idx = self.tree.query(pts, k=self.k)
+            tri = self.tri[np.asarray(idx).reshape(-1)]
+            d, qq = point_triangle_closest(np.repeat(pts, self.k, axis=0), tri[:, 0], tri[:, 1], tri[:, 2])
+            d, qq = d.reshape(m, self.k), qq.reshape(m, self.k, 3)
+            j = d.argmin(1)
+            r = np.arange(m)
+            best[s:s + m], q[s:s + m] = d[r, j], qq[r, j]
+        return best, q
 
 
 def refine_by_deviation(v: np.ndarray, t: np.ndarray, dist, diag: float, max_tris: int = 60_000,
@@ -210,17 +228,23 @@ def refine_by_deviation(v: np.ndarray, t: np.ndarray, dist, diag: float, max_tri
     t = np.asarray(t, np.int64)
     dev = dist(v)
     min_edge = diag / 300
-    for _ in range(rounds):
-        a, b, c = v[t[:, 0]], v[t[:, 1]], v[t[:, 2]]
+
+    def centre_dev(tt):
+        out = np.full(len(tt), np.nan)
+        a, b, c = v[tt[:, 0]], v[tt[:, 1]], v[tt[:, 2]]
         lens = np.stack([np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1), np.linalg.norm(a - c, axis=1)], 1)
         long_ = lens.max(1) > min_edge
-        if not long_.any():
-            break
+        if long_.any():
+            out[long_] = dist((a[long_] + b[long_] + c[long_]) / 3)
+        return out, lens
+
+    dc, lens = centre_dev(t)                    # NaN = triangle already small enough
+    for _ in range(rounds):
         td = dev[t]
-        dc = np.zeros(len(t))
-        dc[long_] = dist((a[long_] + b[long_] + c[long_]) / 3)
-        thr = max(0.15 * max(float(dev.max()), float(dc.max())), 5e-4 * diag)
-        need = long_ & ((td.max(1) - td.min(1) > thr) | (np.abs(dc - td.mean(1)) > thr))
+        top = max(float(dev.max()), float(np.nanmax(dc)) if np.isfinite(dc).any() else 0.0)
+        thr = max(0.15 * top, 5e-4 * diag)
+        long_ = np.isfinite(dc)
+        need = long_ & ((td.max(1) - td.min(1) > thr) | (np.abs(np.nan_to_num(dc) - td.mean(1)) > thr))
         if not need.any() or len(t) + need.sum() > max_tris:
             break
         tb, e = t[need], lens[need].argmax(1)
@@ -230,7 +254,11 @@ def refine_by_deviation(v: np.ndarray, t: np.ndarray, dist, diag: float, max_tri
         mi = np.arange(len(v), len(v) + len(tb))
         v = np.vstack([v, mid])
         dev = np.concatenate([dev, dist(mid)])
-        t = np.vstack([t[~need], np.stack([i0, mi, i2], 1), np.stack([mi, i1, i2], 1)])
+        new_t = np.vstack([np.stack([i0, mi, i2], 1), np.stack([mi, i1, i2], 1)])
+        new_dc, new_lens = centre_dev(new_t)   # only the new triangles need new centre distances
+        t = np.vstack([t[~need], new_t])
+        dc = np.concatenate([dc[~need], new_dc])
+        lens = np.vstack([lens[~need], new_lens])
     return v, t, dev
 
 
@@ -238,9 +266,38 @@ def distances_to_mesh(points: np.ndarray, v: np.ndarray, t: np.ndarray, k: int =
     return MeshDistance(v, t, k)(points)
 
 
+def _icp_refine(R: np.ndarray, T: np.ndarray, src: np.ndarray, target: "MeshDistance", diag: float, iters: int = 25,
+                keep: float = 0.8) -> tuple[np.ndarray, np.ndarray]:
+    """Trimmed ICP against the exact surface of the other mesh: refine (R, T) using the best-matching share of
+    the points, so a local change (a hole, a longer flange) does not pull the alignment of everything else.
+    The result is kept only if it fits better than the starting pose."""
+    def fit(R, T):
+        d, q = target.closest(src @ R.T + T)
+        return float(np.sort(d)[: max(1, int(keep * len(d)))].mean()), d, q
+    best_score, d, q = fit(R, T)
+    best = (R, T)
+    for _ in range(iters):
+        moved = src @ R.T + T
+        m = d <= np.quantile(d, keep)
+        P, Q = moved[m], q[m]
+        pc, qc = P.mean(0), Q.mean(0)
+        U, _, Vt = np.linalg.svd((P - pc).T @ (Q - qc))
+        D = np.diag([1.0, 1.0, np.sign(np.linalg.det(Vt.T @ U.T))])
+        Ri = Vt.T @ D @ U.T                       # proper increment: a mirror alignment stays a mirror
+        Ti = qc - Ri @ pc
+        R, T = Ri @ R, Ri @ T + Ti
+        score, d, q = fit(R, T)
+        if score < best_score - 1e-12:
+            best_score, best = score, (R, T)
+        if np.linalg.norm(Ti) < 1e-6 * diag:
+            break
+    return best
+
+
 def align_meshes(ma: dict, mb: dict, scale_b: float = 1.0, mirror: bool = False, proper_only: bool = False) -> dict:
     """Best rigid alignment of B onto A: principal frames + the shape check's choice among the axis flips
-    (an improper one only for mirror pairs). Returns R, T (applied to B already scaled by scale_b)."""
+    (an improper one only for mirror pairs), refined by trimmed ICP. Returns R, T (applied to B already scaled
+    by scale_b)."""
     from .shape import compare_point_sets
     va, ta = ma["v"].astype(np.float64), ma["t"].astype(np.int64)
     vb, tb = mb["v"].astype(np.float64) * scale_b, mb["t"].astype(np.int64)
@@ -253,6 +310,8 @@ def align_meshes(ma: dict, mb: dict, scale_b: float = 1.0, mirror: bool = False,
     tt = np.array(res["improper_t" if use_improper else "proper_t"])
     R = vec_a @ tt @ vec_b.T
     T = cen_a - R @ cen_b
+    diag = float(np.linalg.norm(va.max(0) - va.min(0))) or 1.0
+    R, T = _icp_refine(R, T, _samples(vb, tb, wb, n=1500, seed=21), MeshDistance(va, ta), diag)
     M = np.eye(4)
     M[:3, :3] = R * scale_b
     M[:3, 3] = T
