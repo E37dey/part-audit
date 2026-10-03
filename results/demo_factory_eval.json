@@ -2,24 +2,24 @@
  "what": "v2 pipeline on the synthetic demo factory, via real connectors against local simulators",
  "seconds": {
   "collect": 4.5,
-  "audit": 40.7
+  "audit": 41.9
  },
  "timings": {
-  "read_s": 9.44,
-  "geometry_s": 19.28,
+  "read_s": 9.85,
+  "geometry_s": 20.22,
   "geometry_files": 423,
   "geometry_unique": 416,
   "geometry_cached": 0,
   "geometry_computed": 416,
-  "geometry_wall_s": 19.276453337999556,
-  "geometry_per_file_mean_s": 0.09112195285094825,
-  "geometry_per_file_median_s": 0.041527359000610886,
-  "geometry_per_file_p90_s": 0.08129607499904523,
-  "geometry_per_file_max_s": 2.5900432639991777,
-  "compare_s": 11.44,
+  "geometry_wall_s": 20.216333708998718,
+  "geometry_per_file_mean_s": 0.09573465141342187,
+  "geometry_per_file_median_s": 0.043020143999456195,
+  "geometry_per_file_p90_s": 0.08751106299860112,
+  "geometry_per_file_max_s": 2.4762645789996895,
+  "compare_s": 11.35,
   "shape_checks": 92,
-  "shape_s": 8.7,
-  "total_s": 40.68
+  "shape_s": 8.67,
+  "total_s": 41.91
  },
  "summary": {
   "parts": 472,
@@ -35,16 +35,17 @@
   "redundant_pns": 178,
   "redundant_stock_value": 117756.23,
   "currency": "ILS",
+  "groups_other_currency": 0,
   "bom_lines_to_update": 77,
   "near_pairs": 33,
   "mirror_pairs": 5,
   "spec_conflicts": 15,
   "pn_conflicts": 7,
-  "name_findings": 58,
+  "name_findings": 57,
   "quality_high": 19,
   "quality_medium": 54,
-  "quality_low": 11,
-  "quality_issues": 42,
+  "quality_low": 14,
+  "quality_issues": 45,
   "erp_issues": 42,
   "skipped_files": 3,
   "per_source": {
@@ -315,9 +316,10 @@
   "legacy_only -> (not flagged) (not merged)": 4,
   "mirror -> (not flagged) (not merged)": 1,
   "mirror -> mirror (not merged)": 5,
+  "near (volume change <= 10%) -> (not flagged) (not merged)": 1,
   "near (volume change <= 10%) -> conflict (not merged)": 3,
   "near (volume change <= 10%) -> mirror (not merged)": 1,
-  "near (volume change <= 10%) -> name_similar (not merged)": 11,
+  "near (volume change <= 10%) -> name_similar (not merged)": 10,
   "near (volume change <= 10%) -> near_identical (not merged)": 23,
   "near (volume change > 10%) -> name_similar (not merged)": 4,
   "oldrev -> (not flagged) (not merged)": 1,
@@ -336,7 +338,8 @@
  "data_quality": {
   "missing_material": {
    "check": "missing_material",
-   "planted": 7,
+   "planted": 14,
+   "checkable": 7,
    "found": 7,
    "recall": 1.0,
    "issues_of_this_type": 7,
@@ -345,6 +348,7 @@
   "stale_mass_high": {
    "check": "mass_mismatch",
    "planted": 2,
+   "checkable": 2,
    "found": 2,
    "recall": 1.0,
    "issues_of_this_type": 11,
@@ -352,7 +356,8 @@
   },
   "stale_mass_low": {
    "check": "mass_mismatch",
-   "planted": 9,
+   "planted": 10,
+   "checkable": 9,
    "found": 8,
    "recall": 0.8889,
    "issues_of_this_type": 11,
@@ -361,6 +366,7 @@
   "filename_pn_mismatch": {
    "check": "filename_pn_mismatch",
    "planted": 6,
+   "checkable": 6,
    "found": 6,
    "recall": 1.0,
    "issues_of_this_type": 6,
@@ -369,6 +375,7 @@
   "pn_format": {
    "check": "pn_format",
    "planted": 4,
+   "checkable": 4,
    "found": 4,
    "recall": 1.0,
    "issues_of_this_type": 4,
@@ -377,6 +384,7 @@
   "bom_state_in_work": {
    "check": "bom_state",
    "planted": 2,
+   "checkable": 2,
    "found": 2,
    "recall": 1.0,
    "issues_of_this_type": 5,
@@ -385,6 +393,7 @@
   "bom_state_obsolete": {
    "check": "obsolete_in_use",
    "planted": 2,
+   "checkable": 2,
    "found": 2,
    "recall": 1.0,
    "issues_of_this_type": 8,
@@ -393,6 +402,7 @@
   "missing_in_erp": {
    "check": "released_not_in_erp",
    "planted": 8,
+   "checkable": 8,
    "found": 8,
    "recall": 1.0,
    "issues_of_this_type": 8,
@@ -401,6 +411,7 @@
   "erp_description_differs": {
    "check": "erp_description_mismatch",
    "planted": 8,
+   "checkable": 8,
    "found": 8,
    "recall": 1.0,
    "issues_of_this_type": 8,
@@ -409,6 +420,7 @@
   "erp_material_differs": {
    "check": "erp_material_mismatch",
    "planted": 5,
+   "checkable": 5,
    "found": 5,
    "recall": 1.0,
    "issues_of_this_type": 6,
@@ -417,6 +429,7 @@
   "erp_bom_qty_differs": {
    "check": "erp_bom_mismatch",
    "planted": 2,
+   "checkable": 2,
    "found": 2,
    "recall": 1.0,
    "issues_of_this_type": 2,
@@ -425,14 +438,25 @@
   "obsolete_but_active_in_erp": {
    "check": "erp_status_mismatch",
    "planted": 8,
+   "checkable": 8,
    "found": 8,
    "recall": 1.0,
    "issues_of_this_type": 8,
    "on_unplanted_records": 0
   },
+  "missing_description": {
+   "check": "missing_description",
+   "planted": 5,
+   "checkable": 3,
+   "found": 3,
+   "recall": 1.0,
+   "issues_of_this_type": 3,
+   "on_unplanted_records": 0
+  },
   "unit_error (archive)": {
    "check": "unit_error",
    "planted": 5,
+   "checkable": 5,
    "found": 5,
    "recall": 1.0
   }

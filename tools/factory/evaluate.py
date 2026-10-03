@@ -155,8 +155,9 @@ def main() -> None:
         if pl.startswith("stale_mass"):
             return bool(p.get("has_step") and p.get("material"))   # needs geometry and a material
         if pl == "missing_description":
-            # the demo's SOLIDWORKS PDM keeps the description in the name variable: an empty one is not visible
-            return p.get("source_kind") != "swpdm_web"
+            # the demo's SOLIDWORKS PDM and Vault simulators fill the description field with the name, so an empty
+            # description is not visible in their data; Windchill and Teamcenter keep a separate field
+            return p.get("source_kind") in ("windchill", "teamcenter")
         return True
     for pl, check in PLANT_TO_CHECK.items():
         all_planted = planted_uids.get(pl, set())

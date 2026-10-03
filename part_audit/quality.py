@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from .names import extract_part_numbers, parse_name, pn_core, pn_key
+from .names import extract_part_numbers, parse_name, pn_core, pn_key, pn_letters_compatible
 from .scoring import material_key, materials_conflict
 
 DENSITY = {"aluminum": 2.70, "steel": 7.85, "stainless": 7.93, "brass": 8.47, "bronze": 8.75, "copper": 8.96,
@@ -146,11 +146,25 @@ def erp_checks(parts: list, assemblies: list, erp_items: list, erp_bom: list, it
     erp_by_key = {pn_key(e.pn): e for e in erp_items}
     if not erp_items:
         return out
+    by_core: dict[str, list] = defaultdict(list)
+    for e in erp_items:
+        by_core[pn_core(e.pn)].append(e)
+
+    def erp_of(pn: str):
+        """Same rule as the link in project.build_items: exact key, else the unique item with the same digits and
+        compatible letters ('9005961' -> '900-5961')."""
+        e = erp_by_key.get(pn_key(pn))
+        if e is None:
+            cands = by_core.get(pn_core(pn), []) if len(pn_core(pn)) >= 4 else []
+            if len(cands) == 1 and pn_letters_compatible(pn, cands[0].pn):
+                e = cands[0]
+        return e
     cad_keys = {pn_key(r.pn) for r in parts + assemblies if r.pn}
+    cad_cores = {pn_core(r.pn) for r in parts + assemblies if r.pn and len(pn_core(r.pn)) >= 4}
     for r in parts + assemblies:
         if r.source_kind == "folder" or not r.pn:
             continue
-        e = erp_by_key.get(pn_key(r.pn))
+        e = erp_of(r.pn)
         if e is None:
             if r.state_class == "released":
                 out.append(issue("released_not_in_erp", "high", [r.uid], f"{r.pn} משוחרר ב-PDM אבל אין לו פריט ב-ERP",
@@ -185,7 +199,7 @@ def erp_checks(parts: list, assemblies: list, erp_items: list, erp_bom: list, it
                                  f"{r.pn} לא פעיל ב-ERP אבל משמש ב-{len(users)} מכלולים משוחררים",
                                  assemblies=[u.pn for u in users]))
     for e in erp_items:
-        if e.active and pn_key(e.pn) not in cad_keys:
+        if e.active and pn_key(e.pn) not in cad_keys and pn_core(e.pn) not in cad_cores:
             out.append(issue("erp_without_cad", "low" if e.make_buy == "buy" else "medium", [],
                              f"{e.pn} – '{e.description}' פעיל ב-ERP אך לא נמצא באף מערכת PDM/PLM",
                              pn=e.pn, description=e.description, stock=e.stock_total, make_buy=e.make_buy))

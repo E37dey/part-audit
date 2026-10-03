@@ -51,7 +51,10 @@
   - כשלשני החלקים יש קובץ STEP: 253 מתוך 256 (98.8%).
   - כשחסר קובץ STEP וההשוואה היא לפי שם, מק"ט ומפרט בלבד: 44 מתוך 62 (71%).
 - **18 זוגות "מלכודת"** (אותה צורה עם מפרט שונה, למשל 8.8 מול 12.9 או 2RS מול ZZ): **אף אחד מהם לא אוחד.** 15 מהם סומנו "צורה זהה, מפרט שונה".
-- **בעיות שנשתלו בנתונים** (13 סוגים, כולל קבצים ביחידות שגויות): כל הבעיות נמצאו, חוץ ממקרה אחד של משקל רשום ישן. בסוג הזה נמצאו 10 מתוך 11.
+- **בעיות שנשתלו בנתונים**: נשתלו 81 בעיות מ-14 סוגים. בדיקות התוכנה מכסות 71 מהן, ומתוכן נמצאו 70. הבעיה שלא נמצאה היא משקל רשום ישן אחד. את 10 הבעיות האחרות התוכנה לא בודקת:
+  - 7 מקרים של חומר חסר בפריטי קנייה. לפריטי קנייה לא דורשים חומר.
+  - משקל של חלק שאין לו קובץ STEP, כך שאין ממה לחשב משקל.
+  - 2 תיאורים ריקים שלא מגיעים לנתונים: הסימולטורים של SOLIDWORKS PDM ו-Vault ממלאים את שדה התיאור בשם החלק.
 
 הפירוט המלא נמצא ב-[RESULTS.md](RESULTS.md).
 
@@ -99,9 +102,18 @@ separate environment with CadQuery (it needs the VTK build of OCP, which cannot 
 
 Every HTTP connector goes through `ReadOnlyHttp`. GET and HEAD always pass. A connector lists the few non-GET
 calls it needs (logins, POST searches, SOA read operations, logouts). Any other request raises `WriteBlocked`
-before it leaves the machine (`tests/test_connectors.py`). The server listens on 127.0.0.1 only. Passwords
-are kept in the OS credential store when one exists (Windows Credential Manager, macOS Keychain); otherwise they
-stay in the local SQLite database. The API never returns them.
+before it leaves the machine. The check also runs on every redirect httpx follows, so a 307 cannot turn an allowed
+login into another call (`tests/test_connectors.py`).
+
+The app binds to a loopback address only (other `--host` values are refused). It answers only when the Host header
+is a loopback name, which blocks DNS rebinding. Requests that change something are refused when they come from
+another site's page (Origin) or are not JSON (`tests/test_app.py`). Calls to a server on this computer bypass any
+configured proxy.
+
+Credentials (password fields, the Priority token) are kept in the OS credential store when one exists (Windows
+Credential Manager, macOS Keychain). Otherwise they stay in the local SQLite database. The API never returns them,
+and a stored credential is dropped when the source's address changes, so it is never sent to a server it was not
+entered for.
 
 ### Connector verification levels
 
@@ -145,8 +157,8 @@ from the simulators, then audited. Numbers from `results/demo_factory_eval.json`
 | … a STEP file is missing (names/spec only) | 44 of 62 (71.0%) |
 | same shape, different spec (hard negatives) | 18 of 18 not merged (15 flagged as spec conflict) |
 | near-identical, mirror and old-revision variants | none merged |
-| planted data-quality and ERP issues (13 kinds) | all found except one stale mass value (stale mass: 10 of 11; unit errors: 5 of 5) |
-| time | 4.5 s reading 6 sources + 40.7 s audit (472 parts, 2 workers, cold cache) |
+| planted data-quality and ERP issues | 81 planted in 14 kinds, 71 within what the checks look at: 70 found (one stale mass missed). Not checked: 7 missing materials on purchased parts (by design), 1 mass without a STEP file, 2 empty descriptions that the SOLIDWORKS PDM and Vault simulators fill with the name |
+| time | 4.5 s reading 6 sources + 41.9 s audit (472 parts, 2 workers, cold cache) |
 
 The v1 measurements (held-out ABC test set, NIST files, 5000-file benchmark) are in [RESULTS.md](RESULTS.md),
 including a re-run of the v1 test set with the v2 engine. The v1 command-line tool is documented in

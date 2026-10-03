@@ -10,7 +10,7 @@ API simulators (SOLIDWORKS PDM Web API, Vault, Windchill, Teamcenter, a legacy f
 compares the result with what the factory builder planted (`demo/factory/factory.json`, `truth`). The factory has
 472 parts, 29 assemblies and 434 ERP items; business data is synthetic, standard-part
 geometry follows ISO/DIN dimensions, and 5 NIST test models are included. Time: 4.5 s reading,
-40.7 s audit (2 workers, cold cache).
+41.9 s audit (2 workers on a 2-vCPU VM, cold cache; a repeat scan reuses the cached geometry).
 
 **Duplicate pairs** (pairs of records that are the same part): 318 true, 297 predicted,
 **297 correct, 0 wrong, 21 missed: precision 100.0%, recall 93.4%**.
@@ -67,9 +67,10 @@ Missed pairs (the first 15 of 21, as listed by the evaluation script):
 | legacy_only -> (not flagged) (not merged) | 4 |
 | mirror -> (not flagged) (not merged) | 1 |
 | mirror -> mirror (not merged) | 5 |
+| near (volume change <= 10%) -> (not flagged) (not merged) | 1 |
 | near (volume change <= 10%) -> conflict (not merged) | 3 |
 | near (volume change <= 10%) -> mirror (not merged) | 1 |
-| near (volume change <= 10%) -> name_similar (not merged) | 11 |
+| near (volume change <= 10%) -> name_similar (not merged) | 10 |
 | near (volume change <= 10%) -> near_identical (not merged) | 23 |
 | near (volume change > 10%) -> name_similar (not merged) | 4 |
 | oldrev -> (not flagged) (not merged) | 1 |
@@ -91,28 +92,33 @@ Missed pairs (the first 15 of 21, as listed by the evaluation script):
 | same case -> identical | 2 |
 | same case -> near_identical | 3 |
 
-**Planted data-quality and ERP issues** (`on unplanted records`: issues of the same check on records where nothing
-was planted; these were not verified one by one and can be real consequences of the factory data):
+**Planted data-quality and ERP issues**: 81 planted in 14 kinds; 71 are within what the checks look at, and
+70 of those were found. *Checkable* leaves out, by design: missing material on purchased parts (the check covers
+manufactured parts), a stale mass on a part without a STEP file (nothing to compute the mass from), and empty
+descriptions in the SOLIDWORKS PDM and Vault simulators, which fill the description field with the name.
+*On unplanted records*: issues of the same check on records where nothing was planted; they were not verified one by
+one and can be real consequences of the factory data.
 
-| Planted | Check | Planted | Found | On unplanted records |
-|---|---|---:|---:|---:|
-| missing_material | `missing_material` | 7 | 7 | 0 |
-| stale_mass_high | `mass_mismatch` | 2 | 2 | 1 |
-| stale_mass_low | `mass_mismatch` | 9 | 8 | 1 |
-| filename_pn_mismatch | `filename_pn_mismatch` | 6 | 6 | 0 |
-| pn_format | `pn_format` | 4 | 4 | 0 |
-| bom_state_in_work | `bom_state` | 2 | 2 | 3 |
-| bom_state_obsolete | `obsolete_in_use` | 2 | 2 | 6 |
-| missing_in_erp | `released_not_in_erp` | 8 | 8 | 0 |
-| erp_description_differs | `erp_description_mismatch` | 8 | 8 | 0 |
-| erp_material_differs | `erp_material_mismatch` | 5 | 5 | 1 |
-| erp_bom_qty_differs | `erp_bom_mismatch` | 2 | 2 | 0 |
-| obsolete_but_active_in_erp | `erp_status_mismatch` | 8 | 8 | 0 |
-| unit_error (archive) | `unit_error` | 5 | 5 | – |
+| Planted | Check | Planted | Checkable | Found | On unplanted records |
+|---|---|---:|---:|---:|---:|
+| missing_material | `missing_material` | 14 | 7 | 7 | 0 |
+| stale_mass_high | `mass_mismatch` | 2 | 2 | 2 | 1 |
+| stale_mass_low | `mass_mismatch` | 10 | 9 | 8 | 1 |
+| filename_pn_mismatch | `filename_pn_mismatch` | 6 | 6 | 6 | 0 |
+| pn_format | `pn_format` | 4 | 4 | 4 | 0 |
+| bom_state_in_work | `bom_state` | 2 | 2 | 2 | 3 |
+| bom_state_obsolete | `obsolete_in_use` | 2 | 2 | 2 | 6 |
+| missing_in_erp | `released_not_in_erp` | 8 | 8 | 8 | 0 |
+| erp_description_differs | `erp_description_mismatch` | 8 | 8 | 8 | 0 |
+| erp_material_differs | `erp_material_mismatch` | 5 | 5 | 5 | 1 |
+| erp_bom_qty_differs | `erp_bom_mismatch` | 2 | 2 | 2 | 0 |
+| obsolete_but_active_in_erp | `erp_status_mismatch` | 8 | 8 | 8 | 0 |
+| missing_description | `missing_description` | 5 | 3 | 3 | 0 |
+| unit_error (archive) | `unit_error` | 5 | 5 | 5 | – |
 
 ## v1 held-out test set re-run with the v2 engine
 
-The v1 test set (below) was scored again on 2026-10-04 with the v2 engine (`results/test_metrics_v2_engine.json`).
+The v1 test set (below) was scored again on 2026-10-04 with the final v2 engine (`results/test_metrics_v2_engine.json`).
 Every metric is identical to the v1 numbers after the documented post-freeze L3b fix
 (`results/test_metrics.json`): A-D 100% precision and recall, E precision 98.1% / recall 100%, F F1 0.781,
 2 false positives in 235 flagged pairs.
