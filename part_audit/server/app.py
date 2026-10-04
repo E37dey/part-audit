@@ -466,6 +466,42 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         nf = store.run_dir(rid) / "notify.json"
         return {"available": True, **ch, "notify": json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else None}
 
+    TREND_KEYS = ("parts", "assemblies", "with_step", "erp_linked", "groups", "groups_cross_source", "redundant_pns",
+                  "redundant_stock_value", "currency", "bom_lines_to_update", "near_pairs", "quality_issues", "erp_issues")
+
+    @app.get("/api/trends")
+    def trends():
+        """Every finished scan, oldest first: its numbers and what changed since the scan before (when known); and
+        how many duplicate groups had an approved decision at the time of each scan."""
+        decisions = sorted((d for d in store.all_decisions() if d["target_type"] == "group"), key=lambda d: d["id"])
+        runs = list(reversed(store.list_runs()))
+        order = {r["id"]: i for i, r in enumerate(runs)}
+        out = []
+        for i, r in enumerate(runs):
+            if r["status"] != "done" or not r["summary"]:
+                continue
+            ch, f = None, store.run_dir(r["id"]) / "changes.json"
+            if f.exists():
+                c = json.loads(f.read_text(encoding="utf-8"))
+                fi = c["findings"]
+                ch = {"new_groups": len(c["groups"]["new"]), "grown_groups": len(c["groups"]["grown"]),
+                      "resolved_groups": len(c["groups"]["resolved"]), "shrunk_groups": len(c["groups"]["shrunk"]),
+                      "new_findings": fi["quality"]["n_new"] + fi["erp_issues"]["n_new"],
+                      "resolved_findings": fi["quality"]["n_resolved"] + fi["erp_issues"]["n_resolved"],
+                      "added": c["records"]["n_added"], "removed": c["records"]["n_removed"],
+                      "unread": c.get("unread_sources") or []}
+            latest: dict[str, str] = {}
+            for d in decisions:
+                # in effect when the scan ran: made on the results of an earlier scan (timestamps only when the
+                # decision does not say which scan it was made on - they have one-second resolution)
+                k = order.get(d.get("run_id") or "")
+                if (k is not None and k < i) or (k is None and d["created"] < r["created"]):
+                    latest[d["target_id"]] = d["decision"]
+            out.append({"run_id": r["id"], "created": r["created"], "trigger": r["trigger"],
+                        "summary": {k: r["summary"].get(k) for k in TREND_KEYS}, "changes": ch,
+                        "approved_groups": sum(1 for v in latest.values() if v == "approve")})
+        return {"runs": out}
+
     @app.post("/api/notify/test")
     def notify_test():
         """A short test message through the configured mail server."""

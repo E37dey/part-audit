@@ -198,6 +198,9 @@ def test_two_scans_their_changes_settings_and_the_command_line(plant, tmp_path, 
         runs = client.get("/api/runs").json()
         assert [r["trigger"] for r in runs] == ["manual", "manual"]
         assert client.get("/api/runs/latest/changes", params={"base": "../../x"}).status_code == 404
+        # the engineer approves the new group; it counts from the next scan on
+        gid = client.get("/api/runs/latest/groups").json()[0]["id"]
+        assert client.post("/api/decisions", json={"target_type": "group", "target_id": gid, "decision": "approve"}).json()["ok"]
 
         # schedule and e-mail settings: checked, the password never comes back
         bad = client.put("/api/settings", json={"schedule": {"enabled": True, "frequency": "hourly"}})
@@ -227,3 +230,12 @@ def test_two_scans_their_changes_settings_and_the_command_line(plant, tmp_path, 
     assert ch["headline"] == "לא השתנה דבר מאז הסריקה הקודמת."
     assert ch["notify"]["sent"] and FakeSMTP.sent and FakeSMTP.sent[0][0] == "mail.local"
     assert main(["rescan", "--workspace", str(tmp_path / "empty")]) == 2
+
+    # trends: every scan oldest first, what changed since the one before, the decisions in effect at each
+    tr = client2.get("/api/trends").json()["runs"]
+    assert [r["trigger"] for r in tr] == ["manual", "manual", "cli"]
+    assert [r["summary"]["groups"] for r in tr] == [0, 1, 1] and [r["summary"]["parts"] for r in tr] == [2, 3, 3]
+    assert tr[0]["changes"] is None
+    assert tr[1]["changes"]["new_groups"] == 1 and tr[1]["changes"]["added"] == 1 and tr[1]["changes"]["resolved_groups"] == 0
+    assert tr[2]["changes"]["new_groups"] == tr[2]["changes"]["added"] == tr[2]["changes"]["removed"] == 0
+    assert [r["approved_groups"] for r in tr] == [0, 0, 1]

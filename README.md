@@ -47,7 +47,8 @@
 4. **דוח להנהלה**: מסמך של שני עמודים (A4) עם המספרים שנמדדו, איפה הכפילויות, מה השתנה ומה מומלץ. מדפיסים או שומרים כ-PDF מהדפדפן.
 5. **חיפוש לפי צורה**: בכרטיס של כל חלק מופיעים החלקים הכי דומים לו בצורה, בכל המערכות ובלי קשר לשם או למק"ט – כדי למצוא חלק קיים שאפשר להשתמש בו שוב.
 6. **צמצום מגוון**: כמה מפרטים של חלקים תקניים בשימוש ותחת כמה מק"טים (למשל 23 מפרטים של בורג אלן ב-55 מק"טים), ומשפחות של חלקים מתוכננים לפי גודל, חומר ושימוש.
-7. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
+7. **מגמות**: המספרים של כל סריקה לאורך זמן – כמה כפילויות נוצרו ונפתרו בכל סריקה, ואיך השתנו הכפילויות, המלאי על מק"טים כפולים ובעיות הנתונים. כל נקודה היא סריקה אמיתית.
+8. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
 
 > **חשוב:** החיבורים נכתבו לפי התיעוד הפומבי של כל יצרן, ונבדקו מול סימולטורים שמחקים את ה-API. הם עוד לא נבדקו מול שרת אמיתי של לקוח. רשימת הפרטים שעוד לא אומתו מופיעה בתוכנה, בכרטיס של כל מערכת.
 
@@ -167,6 +168,9 @@ changed in each source's mapping settings.
 * Variety reduction (`variety.py`, "צמצום מגוון"): standard parts by kind and specification (with the part numbers
   that carry each one, a diameter × length map for screws), designed parts by family (the main noun of the name in
   Hebrew or English); a duplicate group counts as one design; use = BOM lines in the PDM and the ERP. Counted only.
+* Trends (`GET /api/trends`, "מגמות"): every finished scan's numbers over time, what was created and resolved at
+  each scan (from the comparison with the scan before), and the approved groups in effect at each scan. Points are
+  scans; nothing is interpolated or extrapolated. Small SVG charts in `ui/js/chart.js`, no chart library.
 * Management report (`#/report`): a two-page A4 document of the measured numbers (print or save as PDF in the
   browser; also in the online copy). A saving per year appears only when the user entered their own cost
   assumption, and it is labelled as such.

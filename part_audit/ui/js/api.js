@@ -119,6 +119,7 @@ async function staticGet(path, params = {}) {
   if (p === "sources") return staticJson("sources.json");
   if (p === "settings") return (await staticJson("status.json")).settings;
   if (p === "runs") return staticJson("runs.json");
+  if (p === "trends") return staticJson("trends.json");
   if (p === "decisions") return [...memDecisions].reverse();
   if ((m = p.match(/^sources\/([^/]+)\/discovery$/))) {
     const x = (await staticJson("discovery.json"))[decodeURIComponent(m[1])];

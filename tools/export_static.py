@@ -55,8 +55,6 @@ class Packer:
 def pam2(pam1: bytes) -> bytes:
     """Smaller model file for the online copy: positions and edge points as 16-bit integers inside the model's box,
     triangle indices as 16-bit when they fit. Same header as PAM1 (counts + box)."""
-    import struct
-
     import numpy as np
     from part_audit.viewer import parse_mesh
     m = parse_mesh(pam1)
@@ -197,6 +195,7 @@ def main() -> None:
     dump(data / "parts.json", parts)
     dump(data / "part_details.json", {p["uid"]: get(f"/api/runs/latest/parts/{p['uid']}") for p in parts})
     dump(data / "variety.json", get("/api/runs/latest/variety"))
+    dump(data / "trends.json", get("/api/trends"))
     # shape search: the ten closest shapes of every part with a model
     dump(data / "similar.json", {p["uid"]: get(f"/api/runs/latest/similar/{p['uid']}", k=10)
                                  for p in parts if p["has_step"] and p["kind"] == "part"})

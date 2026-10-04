@@ -15,6 +15,7 @@
 
 /* ---------------------------------------------------------------- tokens: dark (default) */
 :root {
+  --chart-a: #5b8cff; --chart-b: #c0893a;   /* chart pair, checked for colour-blind separation on the dark surface */
   --bg: #0e151d;            /* graphite steel */
   --surface: #131c26;
   --surface-2: #18232f;
@@ -52,6 +53,7 @@
 }
 /* light: the blueprint sheet */
 :root[data-theme="light"] {
+  --chart-a: #2457e6; --chart-b: #946510;
   --bg: #edf1f4; --surface: #ffffff; --surface-2: #f5f8fa; --surface-3: #e9eff4;
   --line: #dae2e8; --line-strong: #c3cfd8;
   --ink: #132030; --ink-2: #374857; --muted: #5f7082;
@@ -492,6 +494,17 @@ input[type="checkbox"] { accent-color: var(--dye); width: 15px; height: 15px; }
   .verdict { grid-template-columns: minmax(0, 1fr); padding: 18px; }
   .v-body h2 { font-size: 1.35rem; }
 }
+
+/* charts (trends) */
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; overflow: visible; font-family: var(--font); }
+.chart svg:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 6px; }
+.chart .bar:focus-visible { outline: none; }
+.chart .bar:hover path, .chart .bar:focus path { filter: brightness(1.15); }
+.chart-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface-3); color: var(--ink); border: 1px solid var(--line-strong);
+  border-radius: 8px; padding: 6px 10px; font-size: 0.78rem; line-height: 1.5; box-shadow: 0 10px 24px rgb(0 0 0 / 28%); direction: rtl; white-space: nowrap; }
+.chart-tip b { font-family: var(--mono); font-weight: 600; }
+.chart-tip i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-inline-end: 6px; }
 
 /* variety: a map of the screw sizes in use (diameter x length) */
 table.grid-map th, table.grid-map td { text-align: center; padding: 5px 6px; }

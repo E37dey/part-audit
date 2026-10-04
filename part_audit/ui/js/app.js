@@ -11,10 +11,11 @@ const PAGES = {
   parts: () => import("./pages/parts.js"), part: () => import("./pages/part.js"), settings: () => import("./pages/settings.js"),
   guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"), changes: () => import("./pages/changes.js"),
   report: () => import("./pages/report.js"), variety: () => import("./pages/variety.js"),
+  trends: () => import("./pages/trends.js"),
 };
 // the navigation follows the work: connect the systems, go through the findings, decide
 const NAV = [
-  [null, [["dashboard", "לוח בקרה", ICON.dash], ["changes", "מה השתנה", ICON.delta, "changes"]]],
+  [null, [["dashboard", "לוח בקרה", ICON.dash], ["changes", "מה השתנה", ICON.delta, "changes"], ["trends", "מגמות", ICON.trend]]],
   ["1", "חיבור", [["sources", "מקורות נתונים", ICON.plug]]],
   ["2", "ממצאים", [["groups", "כפילויות", ICON.copy, "groups"], ["near", "כמעט זהים", ICON.near, "near_pairs"],
     ["names", "שמות ומק\"טים", ICON.tag, "name_findings"], ["quality", "איכות נתונים", ICON.check, "quality_issues"],
