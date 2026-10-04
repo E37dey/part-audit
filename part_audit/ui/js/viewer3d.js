@@ -9,13 +9,30 @@ const css = (name, fallback) => getComputedStyle(document.documentElement).getPr
 export function parseMesh(buf) {
   const dv = new DataView(buf);
   const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-  if (magic !== "PAM1") throw new Error("קובץ תצוגה לא תקין");
+  if (magic !== "PAM1" && magic !== "PAM2") throw new Error("קובץ תצוגה לא תקין");
   const nv = dv.getUint32(4, true), nt = dv.getUint32(8, true), ne = dv.getUint32(12, true);
   const bbox = [...new Float32Array(buf.slice(16, 40))];
   let off = 40;
-  const pos = new Float32Array(buf.slice(off, off + nv * 12)); off += nv * 12;
-  const idx = new Uint32Array(buf.slice(off, off + nt * 12)); off += nt * 12;
-  const edges = new Float32Array(buf.slice(off, off + ne * 12));
+  if (magic === "PAM1") {
+    const pos = new Float32Array(buf.slice(off, off + nv * 12)); off += nv * 12;
+    const idx = new Uint32Array(buf.slice(off, off + nt * 12)); off += nt * 12;
+    const edges = new Float32Array(buf.slice(off, off + ne * 12));
+    return { pos, idx, edges, bbox, nv, nt };
+  }
+  // PAM2 (online demo): 16-bit coordinates inside the box, 16-bit indices when they fit
+  const sc = [0, 1, 2].map((k) => (bbox[k + 3] - bbox[k]) / 65535 || 1);
+  const pad = () => { off += (4 - (off % 4)) % 4; };
+  const coords = (n) => {
+    const q = new Uint16Array(buf.slice(off, off + n * 6)); off += n * 6; pad();
+    const out = new Float32Array(n * 3);
+    for (let i = 0; i < n * 3; i++) out[i] = bbox[i % 3] + q[i] * sc[i % 3];
+    return out;
+  };
+  const pos = coords(nv);
+  const wide = nv >= 65536;
+  const idx = wide ? new Uint32Array(buf.slice(off, off + nt * 12)) : Uint32Array.from(new Uint16Array(buf.slice(off, off + nt * 6)));
+  off += nt * (wide ? 12 : 6); pad();
+  const edges = coords(ne);
   return { pos, idx, edges, bbox, nv, nt };
 }
 

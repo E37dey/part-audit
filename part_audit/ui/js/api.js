@@ -7,9 +7,14 @@ const staticCache = {};
 function staticFile(file, kind = "json") {
   const key = `${kind}:${file}`;
   if (!staticCache[key]) {
-    staticCache[key] = fetch(`data/${file}`).then((r) => {
+    staticCache[key] = fetch(`data/${file}`).then(async (r) => {
       if (!r.ok) throw new Error("הנתון לא נכלל בגרסת ההדגמה המקוונת");
-      return kind === "json" ? r.json() : r.arrayBuffer();
+      if (kind === "json") return r.json();
+      // 3D packs are base64 text (the hosting serves web file types only)
+      const bin = atob((await r.text()).trim());
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes.buffer;
     });
   }
   return staticCache[key];

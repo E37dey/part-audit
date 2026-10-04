@@ -24,12 +24,15 @@ MARKER = ".partaudit-static"
 PACK_LIMIT = 6_000_000          # bytes per pack file (well below the hosting limit per file)
 # pairs that get a deviation map online (identical-shape spec conflicts would show an all-blue map)
 COMPARE_CATEGORIES = ("near_identical", "mirror", "conflict")
+THREE_CDN = "https://cdn.jsdelivr.net/npm/three@0.170.0"   # the same version as part_audit/ui/vendor
 GOOGLE_FONTS = ("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500"
                 "&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap")
 
 
 class Packer:
-    """Concatenates binary blobs into pack files of about PACK_LIMIT bytes; index: key -> [file, offset, length]."""
+    """Concatenates binary blobs into pack files of about PACK_LIMIT bytes; index: key -> [file, offset, length].
+    Packs are written as base64 text (.txt): the hosting serves only web file types, and the page decodes a pack
+    once and slices it."""
 
     def __init__(self, folder: Path, prefix: str):
         self.folder, self.prefix = folder, prefix
@@ -39,13 +42,35 @@ class Packer:
     def add(self, key: str, data: bytes) -> None:
         if self.buf and len(self.buf) + len(data) > PACK_LIMIT:
             self.flush()
-        self.index[key] = [f"{self.prefix}_{self.n}.bin", len(self.buf), len(data)]
+        self.index[key] = [f"{self.prefix}_{self.n}.txt", len(self.buf), len(data)]
         self.buf += data
 
     def flush(self) -> None:
+        import base64
         if self.buf:
-            (self.folder / f"{self.prefix}_{self.n}.bin").write_bytes(bytes(self.buf))
+            (self.folder / f"{self.prefix}_{self.n}.txt").write_bytes(base64.b64encode(bytes(self.buf)))
             self.n, self.buf = self.n + 1, bytearray()
+
+
+def pam2(pam1: bytes) -> bytes:
+    """Smaller model file for the online copy: positions and edge points as 16-bit integers inside the model's box,
+    triangle indices as 16-bit when they fit. Same header as PAM1 (counts + box)."""
+    import struct
+
+    import numpy as np
+    from part_audit.viewer import parse_mesh
+    m = parse_mesh(pam1)
+    lo, hi = np.array(m["bbox"][:3], float), np.array(m["bbox"][3:], float)
+    sc = np.where(hi - lo > 0, (hi - lo) / 65535.0, 1.0)
+    q = lambda a: np.clip(np.round((np.asarray(a, float).reshape(-1, 3) - lo) / sc), 0, 65535).astype("<u2")  # noqa: E731
+    out = bytearray(b"PAM2" + pam1[4:40])
+    out += q(m["v"]).tobytes()
+    out.extend(b"\0" * (-len(out) % 4))
+    out += np.asarray(m["t"]).astype("<u2" if len(m["v"]) < 65536 else "<u4").tobytes()
+    out.extend(b"\0" * (-len(out) % 4))
+    out += q(m["e"]).tobytes()
+    out.extend(b"\0" * (-len(out) % 4))
+    return bytes(out)
 
 
 def pac3(pac2: bytes) -> bytes:
@@ -84,7 +109,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--ui-only", action="store_true", help="refresh only the UI files of an earlier export")
     args = ap.parse_args()
+    if args.ui_only:
+        if not (Path(args.out) / MARKER).exists():
+            raise SystemExit("--ui-only needs an earlier export in --out")
+        write_ui(Path(args.out))
+        return
 
     from fastapi.testclient import TestClient
     from part_audit.server.app import create_app
@@ -153,7 +184,7 @@ def main() -> None:
     meshes = Packer(data, "mesh")
     for p in parts:
         if p["has_step"]:
-            meshes.add(p["uid"], binary(f"/api/mesh/latest/{p['uid']}"))
+            meshes.add(p["uid"], pam2(binary(f"/api/mesh/latest/{p['uid']}")))
     meshes.flush()
     dump(data / "mesh_index.json", meshes.index)
     align = {}
@@ -173,13 +204,23 @@ def main() -> None:
     print(f"3D: {len(meshes.index)} models in {meshes.n} packs, {len(compares.index)} deviation maps in {compares.n} packs,"
           f" {len(align)} alignments")
 
-    # the UI, with fonts from Google Fonts and the static flag set before the app starts
+    write_ui(out)
+
+
+def write_ui(out: Path) -> None:
+    """The UI, with fonts from Google Fonts, three.js from the jsDelivr CDN (pinned version), and the static flag
+    set before the app starts."""
     ui = ROOT / "part_audit" / "ui"
-    shutil.copytree(ui, out / "assets", ignore=shutil.ignore_patterns("index.html", "fonts"))
+    if (out / "assets").exists():
+        shutil.rmtree(out / "assets")
+    shutil.copytree(ui, out / "assets", ignore=shutil.ignore_patterns("index.html", "fonts", "vendor"))
     css = (out / "assets" / "css" / "app.css").read_text(encoding="utf-8")
     css = re.sub(r"@font-face \{[^}]*\}\n", "", css)
     css = css.replace('--font: "Plex Hebrew",', '--font: "IBM Plex Sans Hebrew",').replace('--mono: "Plex Mono",', '--mono: "IBM Plex Mono",')
     (out / "assets" / "css" / "app.css").write_text(css, encoding="utf-8")
+    v3d = out / "assets" / "js" / "viewer3d.js"
+    v3d.write_text(v3d.read_text(encoding="utf-8").replace('from "./../vendor/OrbitControls.js";',
+                                                           'from "three/addons/controls/OrbitControls.js";'), encoding="utf-8")
     html = (ui / "index.html").read_text(encoding="utf-8")
     head = re.search(r"<head>(.*)</head>", html, re.S).group(1)
     body = re.search(r"<body>(.*)</body>", html, re.S).group(1)
@@ -188,6 +229,9 @@ def main() -> None:
     head = head.replace("<title>PartAudit</title>", "<title>PartAudit Demo</title>")
     head = head.replace('<link rel="stylesheet" href="assets/css/app.css">',
                         f'<link rel="stylesheet" href="{GOOGLE_FONTS}">\n<link rel="stylesheet" href="assets/css/app.css">')
+    head = re.sub(r'<script type="importmap">.*?</script>', '<script type="importmap">' + json.dumps({"imports": {
+        "three": f"{THREE_CDN}/build/three.module.min.js", "three/addons/": f"{THREE_CDN}/examples/jsm/"}}) + "</script>",
+        head, flags=re.S)
     page = (f"{head.strip()}\n<script>window.PA_STATIC = true; document.documentElement.lang = 'he'; "
             f"document.documentElement.dir = 'rtl';</script>\n{body.strip()}\n")
     (out / "index.html").write_text(page, encoding="utf-8")
