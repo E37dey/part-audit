@@ -1,5 +1,5 @@
 // App shell: navigation rail, top bar, hash router, scan runner.
-import { get, send, isStatic } from "./api.js";
+import { get, send, isStatic, session, can, loadSession } from "./api.js";
 import { esc, ICON, LOGO, n0, datetime, pnChip, sysBadge, debounce } from "./util.js";
 import { modal, toast } from "./ui.js";
 
@@ -48,11 +48,12 @@ function shell() {
       <nav class="nav" id="nav">${NAV.map(([n, title, links]) => (typeof title === "string" ? `<div class="nav-step">${n ? `<i>${n}</i>` : ""}${title}</div>` : "")
         + (Array.isArray(title) ? title : links).map(navLink).join("")).join("")}
         <div class="nav-sep"></div>
-        <a href="#/settings" data-k="settings">${ICON.gear}<span>הגדרות</span></a>
+        ${can("admin") ? `<a href="#/settings" data-k="settings">${ICON.gear}<span>הגדרות</span></a>` : ""}
         <a href="#/guide" data-k="guide">${ICON.book}<span>מדריך</span></a></nav>
       <div class="rail-foot">
+        ${session.team && session.user ? userChip(session.user) : ""}
         <button class="theme-switch" id="theme" type="button">${themeButton()}</button>
-        <div class="lock">${ICON.lock}<span>קריאה בלבד: התוכנה לא כותבת ל-PDM, ל-PLM או ל-ERP. הכול רץ במחשב הזה.</span></div>
+        <div class="lock">${ICON.lock}<span>קריאה בלבד: התוכנה לא כותבת ל-PDM, ל-PLM או ל-ERP. ${session.team ? "הכול רץ בשרת של הצוות." : "הכול רץ במחשב הזה."}</span></div>
         <div id="ver"></div></div>
     </aside>
     <div class="main">
@@ -61,18 +62,48 @@ function shell() {
           aria-label="חיפוש חלק בכל המערכות" aria-controls="gs-list" aria-expanded="false"><kbd>/</kbd><div class="gs-list" id="gs-list" role="listbox" hidden></div></div>
         <span class="runinfo" id="runinfo"></span>
         <button class="btn" id="btn-xls" title="ייצוא כל הממצאים וההחלטות לקובץ Excel בעברית">${ICON.xls}ייצוא Excel</button>
-        <button class="btn primary" id="btn-scan">${ICON.play}סריקה חדשה</button></header>
+        ${can("engineer") ? `<button class="btn primary" id="btn-scan">${ICON.play}סריקה חדשה</button>` : ""}</header>
       <div class="content" id="content"></div>
     </div></div>`;
   document.getElementById("theme").onclick = () => setTheme(theme() === "dark" ? "light" : "dark");
   globalSearch();
-  document.getElementById("btn-scan").onclick = startScan;
+  const scanBtn = document.getElementById("btn-scan");
+  if (scanBtn) scanBtn.onclick = startScan;
+  if (session.team && session.user) {
+    document.getElementById("me-logout").onclick = async () => { try { await send("POST", "/api/auth/logout"); } finally { location.reload(); } };
+    const pw = document.getElementById("me-pw");
+    if (pw) pw.onclick = changePassword;
+  }
   document.getElementById("btn-xls").onclick = () => {
     if (isStatic) { toast("ייצוא Excel זמין באפליקציה המקומית"); return; }
     if (!state.status?.latest_run) { toast("אין עדיין תוצאות לייצוא", true); return; }
     location.href = `/api/runs/${state.status.latest_run}/export.xlsx`;
   };
   if (isStatic) document.getElementById("btn-scan").title = "בגרסה המקוונת מוצגות תוצאות של סריקה שבוצעה; סריקה חדשה רצה באפליקציה המקומית";
+}
+
+// the signed-in user (team server): name, role, password change and sign-out
+function userChip(u) {
+  const initial = (u.display_name || u.username || "?").trim().charAt(0);
+  return `<div class="me"><span class="avatar" aria-hidden="true">${esc(initial)}</span>
+    <div class="me-who"><b title="${esc(u.username)}">${esc(u.display_name || u.username)}</b><span>${esc(u.role_he)}</span></div>
+    <div class="me-acts">${u.password ? '<button class="btn ghost small" id="me-pw" type="button">החלפת סיסמה</button>' : ""}
+    <button class="btn ghost small" id="me-logout" type="button">יציאה</button></div></div>`;
+}
+
+function changePassword() {
+  modal({ title: "החלפת סיסמה", body: `<div class="form one">
+      <div class="field"><label for="pw-cur">הסיסמה הנוכחית</label><input id="pw-cur" type="password" autocomplete="current-password" dir="ltr"></div>
+      <div class="field"><label for="pw-new">סיסמה חדשה</label><input id="pw-new" type="password" autocomplete="new-password" dir="ltr">
+        <span class="help">לפחות 8 תווים. אחרי ההחלפה, כניסות פתוחות במחשבים אחרים מסתיימות.</span></div>
+      <div class="field"><label for="pw-again">שוב, לאימות</label><input id="pw-again" type="password" autocomplete="new-password" dir="ltr"></div></div>`,
+    actions: [{ label: "החלפה", kind: "primary", onClick: async (b) => {
+      const v = (id) => b.querySelector(id).value;
+      if (v("#pw-new") !== v("#pw-again")) { toast("שתי הסיסמאות החדשות שונות", true); return true; }
+      try { await send("POST", "/api/auth/password", { current: v("#pw-cur"), new: v("#pw-new") }); toast("הסיסמה הוחלפה"); }
+      catch (e) { toast(e.message, true); return true; }
+      return false;
+    } }, { label: "ביטול" }] });
 }
 
 export async function refreshStatus() {
@@ -232,9 +263,18 @@ export async function startScan() {
   }
 }
 
+async function signIn(expired = false) {
+  const { showLogin } = await import("./login.js");
+  showLogin({ expired });
+}
+
 async function main() {
+  try { await loadSession(); } catch { /* the status call below reports a server that does not answer */ }
+  if (session.team && !session.user) { signIn(); return; }
+  document.body.dataset.role = session.team && session.user ? session.user.role : "admin";
   shell();
-  try { await refreshStatus(); } catch (e) { document.getElementById("content").innerHTML = `<div class="empty">לא ניתן להתחבר לשרת המקומי: ${esc(e.message)}</div>`; return; }
+  try { await refreshStatus(); } catch (e) { document.getElementById("content").innerHTML = `<div class="empty">לא ניתן להתחבר לשרת: ${esc(e.message)}</div>`; return; }
+  window.addEventListener("pa-login", () => signIn(true), { once: true });
   window.addEventListener("hashchange", route);
   route();
 }

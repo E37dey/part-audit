@@ -120,6 +120,7 @@ async function staticGet(path, params = {}) {
   if (p === "settings") return (await staticJson("status.json")).settings;
   if (p === "runs") return staticJson("runs.json");
   if (p === "trends") return staticJson("trends.json");
+  if (p === "users") return { users: [], roles: {}, team: false, admins: 0 };
   if (p === "decisions") return [...memDecisions].reverse();
   if ((m = p.match(/^sources\/([^/]+)\/discovery$/))) {
     const x = (await staticJson("discovery.json"))[decodeURIComponent(m[1])];
@@ -238,12 +239,29 @@ async function packed(indexFile, key, missing) {
   return buf.slice(hit[1], hit[1] + hit[2]);
 }
 
+// team mode: who is signed in, and what their role allows (the server checks it on every request as well)
+export const session = { team: false, user: null, oidc: { enabled: false, label: "" }, roles: {} };
+const RANK = { viewer: 0, engineer: 1, admin: 2 };
+export const can = (role) => !session.team || (!!session.user && RANK[session.user.role] >= RANK[role]);
+export async function loadSession() {
+  if (STATIC) return session;
+  const r = await fetch("/api/auth/me");
+  if (r.ok) Object.assign(session, await r.json());
+  return session;
+}
+// an answer that is not OK: a lapsed session sends the user to the sign-in screen
+async function failure(r, fallback) {
+  const body = await r.json().catch(() => ({}));
+  if (r.status === 401 && body.login) window.dispatchEvent(new Event("pa-login"));
+  return new Error(body.error || fallback || `שגיאה ${r.status}`);
+}
+
 export async function get(path, params = {}) {
   if (STATIC) return staticGet(path, params);
   const url = new URL(path, location.origin);
   Object.entries(params).forEach(([k, v]) => v !== undefined && v !== null && v !== "" && url.searchParams.set(k, v));
   const r = await fetch(url);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `שגיאה ${r.status}`);
+  if (!r.ok) throw await failure(r);
   return r.json();
 }
 
@@ -266,7 +284,7 @@ export async function send(method, path, body) {
     throw new Error("בגרסת ההדגמה המקוונת אין חיבור למערכות – הפעולה זמינה באפליקציה המקומית");
   }
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `שגיאה ${r.status}`);
+  if (!r.ok) throw await failure(r);
   return r.json();
 }
 
@@ -282,7 +300,7 @@ export async function binary(path, params = {}) {
   const url = new URL(path, location.origin);
   Object.entries(params).forEach(([k, v]) => v !== undefined && v !== "" && url.searchParams.set(k, v));
   const r = await fetch(url);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `שגיאה ${r.status}`);
+  if (!r.ok) throw await failure(r);
   return r.arrayBuffer();
 }
 
@@ -294,7 +312,7 @@ export async function uploadCheck(file, fields) {
   fd.append("file", file);
   Object.entries(fields).forEach(([k, v]) => fd.append(k, v || ""));
   const r = await fetch("/api/checks", { method: "POST", body: fd });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "ההעלאה נכשלה");
+  if (!r.ok) throw await failure(r, "ההעלאה נכשלה");
   return r.json();
 }
 export async function upload(file) {
@@ -302,6 +320,6 @@ export async function upload(file) {
   const fd = new FormData();
   fd.append("file", file);
   const r = await fetch("/api/upload", { method: "POST", body: fd });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "ההעלאה נכשלה");
+  if (!r.ok) throw await failure(r, "ההעלאה נכשלה");
   return r.json();
 }

@@ -10,6 +10,10 @@
     python -m part_audit rescan [--workspace DIR] [--no-email]
         # scan the sources configured in the app now, compare with the scan before and e-mail the changes when that
         # is turned on in the app's settings (for a task of the OS scheduler while the app is closed)
+    python -m part_audit users add NAME --role admin [--display "שם"] [--workspace DIR]   # accounts for team mode
+    python -m part_audit users list | password NAME | role NAME ROLE | disable NAME | enable NAME
+    python -m part_audit serve [--host 0.0.0.0] [--port 8765] [--workspace DIR] [--cert C --key K]
+        # team server: the app for everyone on the network, each person signs in (needs an admin account)
 """
 from __future__ import annotations
 
@@ -70,9 +74,31 @@ def main(argv: list[str] | None = None) -> int:
     ap_app.add_argument("--no-demo", action="store_true", help="do not offer the demo environment")
     ap_app.add_argument("--no-browser", action="store_true")
 
+    sv = sub.add_parser("serve", help="team server: the app for the whole network, everyone signs in")
+    sv.add_argument("--host", default="0.0.0.0", help="address to listen on (default: every network interface)")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
+    sv.add_argument("--cert", help="TLS certificate file (PEM) for https; recommended outside a closed network")
+    sv.add_argument("--key", help="TLS private key file (PEM)")
+    sv.add_argument("--no-demo", action="store_true", help="do not offer the demo environment")
+
+    us = sub.add_parser("users", help="accounts for team mode")
+    us.add_argument("action", choices=["list", "add", "password", "role", "disable", "enable"])
+    us.add_argument("name", nargs="?", default="")
+    us.add_argument("role_arg", nargs="?", default="", metavar="ROLE")
+    us.add_argument("--role", default="", help="viewer | engineer | admin")
+    us.add_argument("--display", default="", help="the name shown next to decisions")
+    us.add_argument("--email", default="")
+    us.add_argument("--password-stdin", action="store_true", help="read the password from standard input")
+    us.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
+
     args = ap.parse_args(argv)
     if args.cmd == "app":
         return run_app(args)
+    if args.cmd == "serve":
+        return run_server(args)
+    if args.cmd == "users":
+        return run_users(args)
     if args.cmd == "check":
         return run_check(args)
     if args.cmd == "rescan":
@@ -186,6 +212,116 @@ def run_rescan(args) -> int:
     print(f"run {out['run_id']}: {out['summary']['parts']} parts, {out['summary']['groups']} duplicate groups")
     if out.get("headline"):
         print(out["headline"])
+    return 0
+
+
+def _read_password(from_stdin: bool, username: str) -> str | None:
+    import getpass
+
+    from .server.auth import password_problem
+    if from_stdin:
+        pw = sys.stdin.readline().rstrip("\r\n")
+    else:
+        pw = getpass.getpass("password: ")
+        if getpass.getpass("again: ") != pw:
+            print("the two passwords differ", file=sys.stderr)
+            return None
+    problem = password_problem(pw, username)
+    if problem:
+        print(problem, file=sys.stderr)
+        return None
+    return pw
+
+
+def run_users(args) -> int:
+    """Manage team-mode accounts from the command line (the first admin, a forgotten password)."""
+    from .server.auth import ROLES, hash_password, username_problem
+    from .server.store import Store
+    store = Store(args.workspace)
+    if args.action == "list":
+        for u in store.list_users():
+            how = "+".join(x for x, on in (("password", u["pw_hash"]), ("company", u["oidc_sub"])) if on) or "-"
+            print(f"{u['username']:<30} {u['role']:<9} {'disabled' if u['disabled'] else 'active':<9} {how:<17} "
+                  f"{u['display_name'] or ''}  last sign-in: {u['last_login'] or '-'}")
+        return 0
+    if not args.name:
+        print("a user name is needed", file=sys.stderr)
+        return 2
+    u = store.find_user(args.name)
+    if args.action == "add":
+        role = args.role or args.role_arg or "viewer"
+        problem = username_problem(args.name)
+        if problem or role not in ROLES or u:
+            print(problem or (f"unknown role {role!r} (viewer, engineer, admin)" if role not in ROLES
+                              else f"user {args.name!r} exists"), file=sys.stderr)
+            return 2
+        pw = _read_password(args.password_stdin, args.name)
+        if pw is None:
+            return 2
+        store.add_user(args.name, role, display_name=args.display, email=args.email, pw_hash=hash_password(pw))
+        print(f"user {args.name} added ({role})")
+        return 0
+    if not u:
+        print(f"no user {args.name!r}", file=sys.stderr)
+        return 2
+    if args.action == "password":
+        pw = _read_password(args.password_stdin, u["username"])
+        if pw is None:
+            return 2
+        store.update_user(u["id"], pw_hash=hash_password(pw))
+        store.end_user_sessions(u["id"])
+    elif args.action == "role":
+        role = args.role_arg or args.role
+        if role not in ROLES:
+            print(f"unknown role {role!r} (viewer, engineer, admin)", file=sys.stderr)
+            return 2
+        if u["role"] == "admin" and role != "admin" and not store.count_admins(except_id=u["id"]):
+            print("at least one active admin has to stay", file=sys.stderr)
+            return 2
+        store.update_user(u["id"], role=role)
+    else:
+        off = args.action == "disable"
+        if off and u["role"] == "admin" and not store.count_admins(except_id=u["id"]):
+            print("at least one active admin has to stay", file=sys.stderr)
+            return 2
+        store.update_user(u["id"], disabled=int(off))
+        if off:
+            store.end_user_sessions(u["id"])
+    print("done")
+    return 0
+
+
+def run_server(args) -> int:
+    """The team server: listens on the network; every person signs in (auth.py has who may do what)."""
+    import socket
+
+    import uvicorn
+
+    from .server.app import create_app
+    from .server.store import Store
+    store = Store(args.workspace)
+    if not store.count_admins():
+        print("Team mode needs an admin account first. Create one with:\n"
+              f"  python -m part_audit users add <name> --role admin --workspace \"{args.workspace}\"\n"
+              "or in the app (Settings > Team) on this computer.", file=sys.stderr)
+        return 2
+    if bool(args.cert) != bool(args.key):
+        print("--cert and --key go together", file=sys.stderr)
+        return 2
+    if not _port_free(args.host, args.port):
+        print(f"port {args.port} is in use on {args.host} - choose another with --port", file=sys.stderr)
+        return 2
+    demo = not args.no_demo
+    if args.cert and demo:
+        demo = False          # the demo systems are called by the server over plain http on 127.0.0.1
+        print("note: the demo environment is not offered with --cert")
+    scheme = "https" if args.cert else "http"
+    app = create_app(args.workspace, demo=demo, base_url=f"http://127.0.0.1:{args.port}", scheduler=True, team=True)
+    print(f"PartAudit team server: {scheme}://{socket.gethostname()}:{args.port}  (workspace: {args.workspace})")
+    if not args.cert:
+        print("note: without --cert passwords cross the network unencrypted - use it outside a closed network, "
+              "or put the server behind your https proxy")
+    uvicorn.run(app, host=args.host, port=args.port, ssl_certfile=args.cert, ssl_keyfile=args.key, log_level="warning")
     return 0
 
 

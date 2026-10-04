@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -20,6 +21,12 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS ix_decisions_target ON decisions(target_type, target_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, display_name TEXT, email TEXT,
+    role TEXT NOT NULL, pw_hash TEXT, oidc_sub TEXT UNIQUE, disabled INTEGER DEFAULT 0, created TEXT, last_login TEXT);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, method TEXT, created REAL, last_seen REAL);
+CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id);
 """
 SECRET_FIELDS = ("password", "app_key", "token")
 MASK = "••••••"
@@ -245,6 +252,91 @@ class Store:
     def all_decisions(self) -> list[dict]:
         with self._conn() as c:
             return [dict(r) for r in c.execute("SELECT * FROM decisions ORDER BY id DESC").fetchall()]
+
+    # ------------------------------------------------------------------ users and sessions (team mode)
+    USER_FIELDS = ("username", "display_name", "email", "role", "pw_hash", "oidc_sub", "disabled", "last_login")
+
+    def list_users(self) -> list[dict]:
+        with self._conn() as c:
+            return [dict(r) for r in c.execute("SELECT * FROM users ORDER BY disabled, username COLLATE NOCASE")]
+
+    def get_user(self, uid: int) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        return dict(r) if r else None
+
+    def find_user(self, username: str) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE", ((username or "").strip(),)).fetchone()
+        return dict(r) if r else None
+
+    def find_user_oidc(self, sub: str) -> dict | None:
+        with self._conn() as c:
+            r = c.execute("SELECT * FROM users WHERE oidc_sub=?", (sub,)).fetchone()
+        return dict(r) if r else None
+
+    def add_user(self, username: str, role: str, display_name: str = "", email: str = "", pw_hash: str | None = None,
+                 oidc_sub: str | None = None) -> dict:
+        with self._lock, self._conn() as c:
+            cur = c.execute("""INSERT INTO users(username, display_name, email, role, pw_hash, oidc_sub, disabled, created)
+                               VALUES(?,?,?,?,?,?,0,?)""", (username.strip(), display_name.strip() or username.strip(),
+                                                         email.strip().lower(), role, pw_hash, oidc_sub, now()))
+            uid = cur.lastrowid
+        return self.get_user(uid)
+
+    def update_user(self, uid: int, **fields) -> dict | None:
+        sets = {k: v for k, v in fields.items() if k in self.USER_FIELDS}
+        if sets:
+            with self._lock, self._conn() as c:
+                c.execute(f"UPDATE users SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?", (*sets.values(), uid))
+        return self.get_user(uid)
+
+    def count_admins(self, except_id: int | None = None) -> int:
+        """Enabled admins (that can sign in: with a password or a company account)."""
+        with self._conn() as c:
+            r = c.execute("""SELECT COUNT(*) FROM users WHERE role='admin' AND disabled=0 AND id<>?
+                             AND (pw_hash IS NOT NULL OR oidc_sub IS NOT NULL)""", (except_id or -1,)).fetchone()
+        return int(r[0])
+
+    def new_session(self, uid: int, method: str = "password") -> str:
+        from .auth import new_token, token_hash
+        token, t = new_token(), time.time()
+        with self._lock, self._conn() as c:
+            c.execute("INSERT INTO sessions(token_hash, user_id, method, created, last_seen) VALUES(?,?,?,?,?)",
+                      (token_hash(token), uid, method, t, t))
+            c.execute("UPDATE users SET last_login=? WHERE id=?", (now(), uid))
+        return token
+
+    def session_user(self, token: str) -> dict | None:
+        """The signed-in user of a session cookie, or None (unknown, expired or the user was disabled)."""
+        from .auth import SESSION_IDLE_S, SESSION_MAX_S, token_hash
+        if not token or len(token) > 200:
+            return None
+        th, t = token_hash(token), time.time()
+        with self._conn() as c:
+            r = c.execute("""SELECT s.created AS s_created, s.last_seen AS s_seen, s.method AS s_method, u.*
+                             FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash=?""", (th,)).fetchone()
+        if not r:
+            return None
+        if r["disabled"] or t - r["s_seen"] > SESSION_IDLE_S or t - r["s_created"] > SESSION_MAX_S:
+            self.end_session(token)
+            return None
+        if t - r["s_seen"] > 300:              # write at most every five minutes
+            with self._lock, self._conn() as c:
+                c.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (t, th))
+        out = {k: r[k] for k in r.keys() if not k.startswith("s_")}
+        out["session_method"] = r["s_method"]
+        return out
+
+    def end_session(self, token: str) -> None:
+        from .auth import token_hash
+        with self._lock, self._conn() as c:
+            c.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash(token or ""),))
+
+    def end_user_sessions(self, uid: int, keep_token: str | None = None) -> None:
+        from .auth import token_hash
+        with self._lock, self._conn() as c:
+            c.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (uid, token_hash(keep_token or "")))
 
     # ------------------------------------------------------------------ settings
     def get_settings(self) -> dict:

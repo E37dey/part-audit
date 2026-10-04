@@ -25,12 +25,12 @@ export async function render({ el, setTitle, refreshStatus, state }) {
         <label class="small">מיון <select id="sort"><option value="value">שווי מלאי כפול</option><option value="members">מספר רשומות</option>
           <option value="used">שימושים</option><option value="conf">ביטחון</option><option value="name">שם</option></select></label>
       </div>
-      <div class="panel-h" id="bulk" hidden style="background:var(--dye-soft)">
+      <div class="panel-h need-engineer" id="bulk" hidden style="background:var(--dye-soft)">
         <b id="bulk-n"></b><button class="btn ok small" data-b="approve">אשר את המסומנות</button>
         <button class="btn bad small" data-b="reject">דחה את המסומנות</button><button class="btn small" data-b="review">סמן לבדיקה</button>
         <button class="btn ghost small" data-b="clear">נקה בחירה</button>
         <span class="small muted">באישור מרוכז כל קבוצה מאושרת עם המק"ט שמוצג לה ברשימה: יעד שאושר בה קודם, או המוצע.</span></div>
-      <div class="table-wrap"><table class="t"><thead><tr><th class="sel-col"><input type="checkbox" id="all" aria-label="בחר הכול"></th>
+      <div class="table-wrap"><table class="t"><thead><tr><th class="sel-col need-engineer"><input type="checkbox" id="all" aria-label="בחר הכול"></th>
         <th>חלק</th><th>סוג</th><th>מק"ט שנשאר</th><th>מק"טים כפולים</th><th>מערכות</th><th class="n">שימושים</th>
         <th class="n">מלאי במק"טים הכפולים</th><th class="n">ביטחון</th><th>החלטה</th></tr></thead><tbody id="tb"></tbody></table></div>
       <div class="panel-b small muted row" id="foot"></div>
@@ -49,7 +49,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
   const draw = () => {
     const r = filtered();
     tb.innerHTML = r.slice(0, f.shown).map((g) => `<tr class="click" data-id="${g.id}">
-      <td class="sel-col"><input type="checkbox" data-sel="${g.id}" ${sel.has(g.id) ? "checked" : ""} aria-label="בחר"></td>
+      <td class="sel-col need-engineer"><input type="checkbox" data-sel="${g.id}" ${sel.has(g.id) ? "checked" : ""} aria-label="בחר"></td>
       <td>${esc(g.name)}${g.spec ? `<div class="small muted mono">${esc(g.spec)}</div>` : ""}</td><td>${groupPill(g.category)}</td>
       <td class="nowrap">${pnChip(g.final_master_pn || g.master_pn, true)}${(g.final_master_pn || g.master_pn) !== g.master_pn ? '<div class="small muted">אושר על ידי המאשר</div>' : ""}</td>
       <td>${g.pns.filter((p) => p !== (g.final_master_pn || g.master_pn)).map((p) => pnChip(p)).join(" ")}</td>

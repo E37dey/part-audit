@@ -1,6 +1,6 @@
 // Small UI kit: toasts, modal dialogs, in-page confirmation, decision bar, simple bar charts.
 import { esc, DECISION } from "./util.js";
-import { send, isStatic } from "./api.js";
+import { send, isStatic, can } from "./api.js";
 
 export function toast(msg, bad = false) {
   const box = document.getElementById("toasts");
@@ -51,6 +51,12 @@ export function decisionBar(el, { type, id, current = "", note = "", by = "", at
   labels = {} }) {
   const L = { approve: labels.approve || "אשר", reject: labels.reject || "דחה", review: labels.review || "לבדיקה" };
   const [curHe, tone] = DECISION[current || ""] || DECISION[""];
+  if (!can("engineer")) {          // a viewer on the team server sees the decision, engineers make it
+    el.innerHTML = `<div class="decision"><span class="pill ${tone}">${curHe}</span>
+      ${by ? `<span class="small muted">${esc(by)} · ${esc((at || "").replace("T", " ").slice(0, 16))}</span>` : ""}
+      ${note ? `<span class="small">${esc(note)}</span>` : ""}<span class="small muted">ההחלטות נרשמות על ידי מהנדסים; ההרשאה שלך היא צפייה.</span></div>`;
+    return;
+  }
   el.innerHTML = `<div class="decision">
       <span class="pill ${tone}">${curHe}</span>
       ${by ? `<span class="small muted">${esc(by)} · ${esc((at || "").replace("T", " ").slice(0, 16))}</span>` : ""}

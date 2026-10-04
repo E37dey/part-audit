@@ -1,5 +1,5 @@
 // Findings lists: names & part numbers, data quality, ERP vs PDM. Each row can be marked for fixing or dismissed.
-import { get, send } from "../api.js";
+import { get, send, can } from "../api.js";
 import { esc, n0, sevPill, uidLink, pnChip, debounce } from "../util.js";
 import { tabs, toast } from "../ui.js";
 
@@ -52,7 +52,8 @@ export async function render({ el, page, param, setTitle }) {
     el.querySelector("#tb").innerHTML = r.slice(0, f.shown).map((x) => `<tr>${k.sev ? `<td>${sevPill(x.severity)}</td>` : ""}
       <td class="small">${esc(x.type_he)}</td><td style="max-width:560px">${detail(x)}</td>
       <td class="small">${x.parts.map((p) => `<div class="nowrap">${uidLink(p.uid, pnChip(p.pn))} <span class="muted">${esc(p.source)}</span></div>`).join("")}</td>
-      <td><select data-id="${x.id}" aria-label="טיפול">${ACTIONS.map(([v, l]) => `<option value="${v}" ${v === (x.decision || "") ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <td>${can("engineer") ? `<select data-id="${x.id}" aria-label="טיפול">${ACTIONS.map(([v, l]) => `<option value="${v}" ${v === (x.decision || "") ? "selected" : ""}>${l}</option>`).join("")}</select>`
+        : `<span class="small">${(ACTIONS.find(([v]) => v === (x.decision || "")) || ACTIONS[0])[1]}</span>`}
         ${x.decision_by ? `<div class="small muted">${esc(x.decision_by)}</div>` : ""}</td></tr>`).join("")
       || '<tr><td colspan="5"><div class="empty">אין ממצאים שמתאימים לסינון</div></td></tr>';
     el.querySelector("#foot").innerHTML = `מוצגים ${n0(Math.min(f.shown, r.length))} מתוך ${n0(r.length)}

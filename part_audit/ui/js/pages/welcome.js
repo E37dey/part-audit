@@ -16,7 +16,7 @@ export async function render({ el, setTitle, go, refreshStatus, state }) {
         <li><div><b>מאשרים ומייצאים</b><div class="muted small">מהנדס מאשר או דוחה כל הצעה, ומקבל קובץ Excel מסודר לביצוע</div></div></li>
       </ol>
       <div class="row">
-        ${state.status.demo_available ? '<button class="btn primary big" id="demo">טען סביבת הדגמה</button>' : ""}
+        ${state.status.demo_available ? '<button class="btn primary big need-admin" id="demo">טען סביבת הדגמה</button>' : ""}
         <button class="btn big" id="own">חבר מערכת משלי</button>
       </div>
       ${state.status.demo_available ? '<p class="small muted">סביבת ההדגמה: קבוצת תעשייה בדויה עם 4 אתרים, 4 מערכות PDM/PLM שונות, ארכיון קבצים ישן ו-ERP. בערך 500 חלקים אמיתיים מבחינה הנדסית (ברגים לפי ISO/DIN, מסבים, צירים, פלטות, חלקי פח ו-5 מודלים של NIST).</p>' : ""}

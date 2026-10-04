@@ -13,10 +13,11 @@ from .changes import compare_runs, unavailable_sources
 from .notify import DEFAULT_EMAIL, SECRET, build_message, compose, send, should_send
 from .project import ProjectSettings, audit_snapshot, collect
 from .schedule import DEFAULT_SCHEDULE
+from .server.oidc import DEFAULT_OIDC
 
 DEFAULT_SETTINGS = {"user_name": "", "mass_tolerance": 0.10, "workers": max(1, (os.cpu_count() or 2) - 1),
                     "cost_per_pn_year": None, "currency": "ILS", "thresholds": {}, "schedule": DEFAULT_SCHEDULE,
-                    "email": DEFAULT_EMAIL}
+                    "email": DEFAULT_EMAIL, "oidc": DEFAULT_OIDC}
 
 Progress = Callable[[str, float, str], None]
 
@@ -25,6 +26,7 @@ def settings_of(store) -> dict:
     cfg = {**DEFAULT_SETTINGS, **store.get_settings()}
     cfg["schedule"] = {**DEFAULT_SCHEDULE, **(cfg.get("schedule") or {})}
     cfg["email"] = {**DEFAULT_EMAIL, **(cfg.get("email") or {})}
+    cfg["oidc"] = {**DEFAULT_OIDC, **(cfg.get("oidc") or {})}
     return cfg
 
 

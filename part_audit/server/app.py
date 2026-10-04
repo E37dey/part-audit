@@ -12,8 +12,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__, connectors
 from ..demo import DEMO_DIR, demo_sources
@@ -22,10 +23,14 @@ from ..decisions import chosen_target, effective_mapping, group_impact, group_ta
 from ..names import pn_key
 from ..project import ProjectSettings
 from ..runner import DEFAULT_SETTINGS, run_scan, settings_of
+from . import oidc
+from .auth import (COOKIE, ROLE_HE, ROLES, SESSION_MAX_S, Throttle, allowed, hash_password, password_problem, public_user,
+                   required_role, username_problem, verify_password)
 from .store import MASK, Store
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
+LOOPBACK_IPS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
 
 
@@ -50,13 +55,13 @@ def _host_port(host_header: str) -> int | None:
     return int(rest[1:]) if rest.startswith(":") and rest[1:].isdigit() else None
 
 
-def _same_origin(origin: str, host_header: str) -> bool:
-    """The page that sent the request was served by this app (same host name and port)."""
+def _same_origin(origin: str, host_header: str, scheme: str = "http") -> bool:
+    """The page that sent the request was served by this app (same scheme, host name and port)."""
     try:
         u = urlsplit(origin.strip())
     except ValueError:
         return False
-    return u.scheme == "http" and u.netloc.lower() == host_header.strip().lower()
+    return u.scheme == scheme and u.netloc.lower() == host_header.strip().lower()
 
 
 class Jobs:
@@ -121,7 +126,9 @@ def _rebase_demo_sources(store: "Store", base_url: str) -> None:
 
 
 def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR, demo: bool = True,
-               base_url: str = "http://127.0.0.1:8765", scheduler: bool = False) -> FastAPI:
+               base_url: str = "http://127.0.0.1:8765", scheduler: bool = False, team: bool = False) -> FastAPI:
+    """team=False: this computer only, nobody signs in. team=True (the team server): any address on the network,
+    and every request needs a signed-in user with the right role (auth.py)."""
     store = Store(workspace)
     jobs = Jobs()
     results: dict[str, dict] = {}
@@ -130,26 +137,49 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
 
     own_port = urlsplit(base_url).port or 80
 
+    def client_ip(request: Request) -> str:
+        return request.client.host if request.client else ""
+
     @app.middleware("http")
-    async def local_only(request: Request, call_next):
-        """Only this computer's browser may use the app: the Host header must be a loopback name (blocks DNS
-        rebinding), and a request that changes something must come from the app's own page: addressed to the
-        app's own port, with no other site as its origin."""
-        host = request.headers.get("host", "")
-        if _host_name(host) not in LOOPBACK_NAMES:
+    async def guard(request: Request, call_next):
+        """Single computer: only this computer's browser may use the app - the Host header must be a loopback name
+        (blocks DNS rebinding). Team server: every request needs a signed-in user whose role allows it, and the demo
+        systems answer only the server itself. Both: a request that changes something must come from the app's own
+        page (no other site as its origin)."""
+        host, path = request.headers.get("host", ""), request.url.path
+        request.state.user = None
+        if not team and _host_name(host) not in LOOPBACK_NAMES:
             return JSONResponse({"error": "גישה מותרת רק מהמחשב הזה (127.0.0.1)"}, status_code=403)
+        if team and path.startswith("/sim/") and client_ip(request) not in LOOPBACK_IPS:
+            return JSONResponse({"error": "מערכות ההדגמה זמינות רק לשרת עצמו"}, status_code=403)
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
             site = (request.headers.get("sec-fetch-site") or "").lower()
-            if (_host_port(host) != own_port or (origin is not None and not _same_origin(origin, host))
+            if ((not team and _host_port(host) != own_port)
+                    or (origin is not None and not _same_origin(origin, host, request.url.scheme))
                     or site not in ("", "same-origin", "none")):
                 return JSONResponse({"error": "בקשה מאתר אחר נחסמה"}, status_code=403)
-            if request.url.path.startswith("/api/"):
+            if path.startswith("/api/"):
                 ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
                 if ctype not in ("", "application/json", "multipart/form-data"):
                     return JSONResponse({"error": "סוג בקשה לא נתמך"}, status_code=415)
-        return await call_next(request)
-    app.state.store, app.state.jobs, app.state.base_url = store, jobs, base_url
+        if team and not path.startswith("/sim/"):
+            need = required_role(request.method, path)
+            user = store.session_user(request.cookies.get(COOKIE, "")) if need is not None or path.startswith("/api/auth/") else None
+            request.state.user = user
+            if not allowed(user, need):
+                if user is None:
+                    return JSONResponse({"error": "צריך להיכנס עם שם משתמש", "login": True}, status_code=401)
+                return JSONResponse({"error": f"אין לך הרשאה לפעולה הזו (נדרשת הרשאת {ROLE_HE[need]})", "forbidden": True},
+                                    status_code=403)
+        resp = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "same-origin")
+        if path.startswith("/api/auth/") or path.startswith("/api/users"):
+            resp.headers.setdefault("Cache-Control", "no-store")
+        return resp
+    app.state.store, app.state.jobs, app.state.base_url, app.state.team = store, jobs, base_url, team
     factory_dir = Path(factory_dir) if factory_dir else None
     demo_available = bool(demo and factory_dir and (factory_dir / "factory.json").exists())
     if demo_available:
@@ -227,15 +257,29 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         return p
 
     # ------------------------------------------------------------------ status / config
+    def current(request: Request) -> dict | None:
+        return getattr(request.state, "user", None)
+
+    def actor(request: Request, named: str = "") -> str:
+        """Who is doing this: the signed-in user on the team server, else the name in this computer's settings."""
+        u = current(request)
+        if team:
+            return (u or {}).get("display_name") or (u or {}).get("username") or "משתמש"
+        return (named or settings().get("user_name") or "").strip() or "משתמש"
+
     @app.get("/api/status")
-    def status():
+    def status(request: Request):
         latest = store.latest_run()
         summary = None
         if latest:
             summary = next((r["summary"] for r in store.list_runs() if r["id"] == latest), None)
-        return {"version": __version__, "demo_available": demo_available, "workspace": str(store.ws),
+        st, u = settings(), current(request)
+        admin = not team or (u or {}).get("role") == "admin"
+        if not admin:                          # mail server and sign-in settings are for admins
+            st = {k: v for k, v in st.items() if k not in ("email", "oidc")}
+        return {"version": __version__, "demo_available": demo_available, "workspace": str(store.ws) if admin else "",
                 "sources": len(store.list_sources()), "latest_run": latest, "summary": summary,
-                "running": jobs.running(), "settings": settings(),
+                "running": jobs.running(), "settings": st, "team": team, "user": public_user(u),
                 "demo_loaded": any(s["simulated"] for s in store.list_sources())}
 
     @app.get("/api/connectors")
@@ -250,6 +294,8 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         from ..schedule import describe, next_slot
         out = settings()
         out["email"] = {**out["email"], "password": MASK if store.get_secret(SECRET) else ""}
+        out["oidc"] = {**out["oidc"], "client_secret": MASK if store.get_secret(oidc.SECRET) else ""}
+        out["team"] = team
         sc = out["schedule"]
         out["schedule_info"] = {"text": describe(sc), "last": store.get_settings().get("schedule_last"),
                                 "next": next_slot(sc, dt.datetime.now()).isoformat(timespec="minutes")
@@ -262,7 +308,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         from ..schedule import DEFAULT_SCHEDULE
         body = await request.json()
         old = settings()
-        allowed = {k: v for k, v in body.items() if k in DEFAULT_SETTINGS and k not in ("schedule", "email")}
+        allowed = {k: v for k, v in body.items() if k in DEFAULT_SETTINGS and k not in ("schedule", "email", "oidc")}
         if isinstance(body.get("schedule"), dict):
             sc = {**old["schedule"], **{k: v for k, v in body["schedule"].items() if k in DEFAULT_SCHEDULE and k != "since"}}
             if sc["frequency"] not in ("daily", "weekly") or not re.fullmatch(r"\d{1,2}:\d{2}", str(sc["time"])):
@@ -287,8 +333,234 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             elif em["host"] != old["email"]["host"] or em["user"] != old["email"]["user"]:
                 store.set_secret(SECRET, "")      # a password is never sent to a server it was not entered for
             allowed["email"] = em
+        if isinstance(body.get("oidc"), dict):
+            oc = {**old["oidc"], **{k: v for k, v in body["oidc"].items() if k in oidc.DEFAULT_OIDC}}
+            oc["enabled"], oc["auto_create"] = bool(oc["enabled"]), bool(oc["auto_create"])
+            oc["issuer"], oc["client_id"] = str(oc["issuer"]).strip().rstrip("/"), str(oc["client_id"]).strip()
+            oc["label"] = str(oc["label"]).strip()[:60] or oidc.DEFAULT_OIDC["label"]
+            if oc["default_role"] not in ("viewer", "engineer"):
+                raise HTTPException(400, "משתמש חדש מחשבון החברה יכול לקבל הרשאת צפייה או מהנדס")
+            if oc["issuer"]:
+                try:
+                    oidc._check_url(oc["issuer"])
+                except oidc.OIDCError as exc:
+                    raise HTTPException(400, str(exc))
+            if oc["enabled"] and not (oc["issuer"] and oc["client_id"]):
+                raise HTTPException(400, "לכניסה עם חשבון החברה צריך כתובת ספק זהות (Issuer) ו-Client ID")
+            sec = body["oidc"].get("client_secret")
+            if sec and sec != MASK:
+                store.set_secret(oidc.SECRET, str(sec))
+            elif oc["issuer"] != old["oidc"]["issuer"] or oc["client_id"] != old["oidc"]["client_id"]:
+                store.set_secret(oidc.SECRET, "")     # a secret is never sent to a provider it was not entered for
+            if oc["issuer"] != old["oidc"]["issuer"]:
+                oidc.clear_cache()
+            allowed["oidc"] = oc
         store.set_settings(allowed)
         return get_settings()
+
+    # ------------------------------------------------------------------ team mode: sign-in and users
+    user_throttle, ip_throttle = Throttle(limit=5), Throttle(limit=20)
+    pending_sign_ins: dict[str, dict] = {}
+    OIDC_COOKIE = "pa_oidc"
+
+    def set_cookie(resp: Response, name: str, value: str, max_age: int, request: Request, path: str = "/") -> None:
+        resp.set_cookie(name, value, max_age=max_age, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https", path=path)
+
+    def to_login(message: str) -> RedirectResponse:
+        from urllib.parse import quote
+        resp = RedirectResponse("/?login_error=" + quote(message[:300]), status_code=303)
+        resp.delete_cookie(OIDC_COOKIE, path="/api/auth/oidc")
+        return resp
+
+    @app.get("/api/auth/me")
+    def auth_me(request: Request):
+        oc = settings()["oidc"]
+        return {"team": team, "user": public_user(current(request)), "roles": ROLE_HE,
+                "oidc": {"enabled": bool(team and oc["enabled"] and oc["issuer"] and oc["client_id"]), "label": oc["label"]}}
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request):
+        if not team:
+            raise HTTPException(400, "במצב של מחשב אחד אין צורך בכניסה")
+        body = await request.json()
+        name, pw = str(body.get("username") or "").strip()[:120], str(body.get("password") or "")[:1024]
+        ukey, ikey = f"u:{name.lower()}", f"ip:{client_ip(request)}"
+        wait = max(user_throttle.wait(ukey), ip_throttle.wait(ikey))
+        if wait:
+            raise HTTPException(429, f"יותר מדי ניסיונות כניסה שגויים. נסו שוב בעוד {max(1, round(wait / 60))} דקות")
+        u = store.find_user(name) if name else None
+        ok = await run_in_threadpool(verify_password, pw, (u or {}).get("pw_hash"))
+        if not ok or not u:
+            user_throttle.fail(ukey)
+            ip_throttle.fail(ikey)
+            raise HTTPException(401, "שם המשתמש או הסיסמה שגויים")
+        if u["disabled"]:
+            raise HTTPException(403, "המשתמש הושבת – פנו למנהל המערכת")
+        user_throttle.ok(ukey)
+        resp = JSONResponse({"ok": True, "user": public_user(store.get_user(u["id"]))})
+        set_cookie(resp, COOKIE, store.new_session(u["id"], "password"), SESSION_MAX_S, request)
+        return resp
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request):
+        tok = request.cookies.get(COOKIE)
+        if tok:
+            store.end_session(tok)
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(COOKIE, path="/")
+        return resp
+
+    @app.post("/api/auth/password")
+    async def auth_password(request: Request):
+        """A signed-in user changes their own password; their other sessions end."""
+        u = current(request)
+        if not team or not u:
+            raise HTTPException(400, "במצב של מחשב אחד אין סיסמאות")
+        if not u.get("pw_hash"):
+            raise HTTPException(400, "נכנסת עם חשבון החברה – הסיסמה מנוהלת שם")
+        body = await request.json()
+        if not await run_in_threadpool(verify_password, str(body.get("current") or ""), u["pw_hash"]):
+            raise HTTPException(400, "הסיסמה הנוכחית שגויה")
+        new = str(body.get("new") or "")
+        problem = password_problem(new, u["username"])
+        if problem:
+            raise HTTPException(400, problem)
+        store.update_user(u["id"], pw_hash=await run_in_threadpool(hash_password, new))
+        store.end_user_sessions(u["id"], keep_token=request.cookies.get(COOKIE))
+        return {"ok": True}
+
+    @app.get("/api/auth/oidc/start")
+    def oidc_start(request: Request):
+        oc = settings()["oidc"]
+        if not team or not oc["enabled"]:
+            return to_login("הכניסה עם חשבון החברה לא מופעלת")
+        callback = f"{request.url.scheme}://{request.headers.get('host', '')}/api/auth/oidc/callback"
+        try:
+            url, pending = oidc.start(oc, callback)
+        except oidc.OIDCError as exc:
+            return to_login(str(exc))
+        now_t = time.time()
+        for k in [k for k, v in pending_sign_ins.items() if now_t - v["at"] > oidc.PENDING_S]:
+            pending_sign_ins.pop(k, None)
+        while len(pending_sign_ins) >= 500:
+            pending_sign_ins.pop(next(iter(pending_sign_ins)))
+        pending_sign_ins[pending["state"]] = pending
+        resp = RedirectResponse(url, status_code=302)
+        set_cookie(resp, OIDC_COOKIE, pending["state"], oidc.PENDING_S, request, path="/api/auth/oidc")
+        return resp
+
+    def company_user(ident: dict, oc: dict) -> dict:
+        """The account of a company sign-in: linked before, or the account with that e-mail, or a new one."""
+        u = store.find_user_oidc(ident["sub"])
+        if not u and ident["email"]:
+            u = store.find_user(ident["email"]) or next((x for x in store.list_users()
+                                                          if (x.get("email") or "").lower() == ident["email"]), None)
+            if u and u.get("oidc_sub") and u["oidc_sub"] != ident["sub"]:
+                raise oidc.OIDCError("המשתמש עם המייל הזה כבר מקושר לחשבון חברה אחר")
+            if u:
+                u = store.update_user(u["id"], oidc_sub=ident["sub"], email=ident["email"])
+        if not u:
+            if not oc["auto_create"]:
+                raise oidc.OIDCError("החשבון שלך עוד לא נוסף ל-PartAudit – בקשו ממנהל המערכת להוסיף אתכם")
+            base = (ident["email"] or ident["sub"].split("|", 1)[-1])[:100]
+            name, n = base, 1
+            while store.find_user(name):
+                n += 1
+                name = f"{base}-{n}"
+            u = store.add_user(name, oc["default_role"] if oc["default_role"] in ("viewer", "engineer") else "viewer",
+                               display_name=ident["name"], email=ident["email"], oidc_sub=ident["sub"])
+        if u["disabled"]:
+            raise oidc.OIDCError("המשתמש שלך הושבת ב-PartAudit – פנו למנהל המערכת")
+        return u
+
+    @app.get("/api/auth/oidc/callback")
+    def oidc_callback(request: Request, code: str = "", state: str = "", error: str = "", error_description: str = ""):
+        import hmac
+        oc = settings()["oidc"]
+        pending = pending_sign_ins.pop(state, None) if state else None
+        if not team or not oc["enabled"]:
+            return to_login("הכניסה עם חשבון החברה לא מופעלת")
+        if error:
+            return to_login(f"ספק הזהות לא השלים את הכניסה: {(error_description or error)[:200]}")
+        cookie = request.cookies.get(OIDC_COOKIE, "")
+        if not pending or not code or not cookie or not hmac.compare_digest(cookie, state):
+            return to_login("הכניסה לא הושלמה – נסו שוב")
+        try:
+            claims = oidc.finish(oc, store.get_secret(oidc.SECRET), code, pending)
+            u = company_user(oidc.identity(oc, claims), oc)
+        except oidc.OIDCError as exc:
+            return to_login(str(exc))
+        resp = RedirectResponse("/", status_code=303)
+        resp.delete_cookie(OIDC_COOKIE, path="/api/auth/oidc")
+        set_cookie(resp, COOKIE, store.new_session(u["id"], "oidc"), SESSION_MAX_S, request)
+        return resp
+
+    @app.post("/api/auth/oidc/test")
+    def oidc_test():
+        """Settings screen: reach the provider entered there and check it publishes what sign-in needs."""
+        try:
+            return {"ok": True, **oidc.check_config(settings()["oidc"])}
+        except oidc.OIDCError as exc:
+            raise HTTPException(400, str(exc))
+
+    def keep_an_admin(u: dict, role: str | None, disabled: bool | None) -> None:
+        losing = u["role"] == "admin" and not u["disabled"] and ((role and role != "admin") or disabled)
+        if losing and store.count_admins(except_id=u["id"]) == 0:
+            raise HTTPException(400, "חייב להישאר לפחות מנהל פעיל אחד")
+
+    @app.get("/api/users")
+    def users_list():
+        return {"users": [public_user(u) for u in store.list_users()], "roles": ROLE_HE, "team": team,
+                "admins": store.count_admins()}
+
+    @app.post("/api/users")
+    async def users_add(request: Request):
+        body = await request.json()
+        name = str(body.get("username") or "").strip()
+        problem = username_problem(name)
+        if problem:
+            raise HTTPException(400, problem)
+        if store.find_user(name):
+            raise HTTPException(400, "כבר יש משתמש בשם הזה")
+        if body.get("role") not in ROLES:
+            raise HTTPException(400, "הרשאה לא מוכרת")
+        pw = str(body.get("password") or "")
+        problem = password_problem(pw, name)
+        if problem:
+            raise HTTPException(400, problem)
+        u = store.add_user(name, body["role"], display_name=str(body.get("display_name") or "")[:120],
+                           email=str(body.get("email") or "")[:200], pw_hash=await run_in_threadpool(hash_password, pw))
+        return public_user(u)
+
+    @app.put("/api/users/{uid}")
+    async def users_update(uid: int, request: Request):
+        u = store.get_user(uid)
+        if not u:
+            raise HTTPException(404, "המשתמש לא נמצא")
+        body = await request.json()
+        fields: dict = {}
+        if "display_name" in body:
+            fields["display_name"] = str(body["display_name"] or "").strip()[:120] or u["username"]
+        if "email" in body:
+            fields["email"] = str(body["email"] or "").strip().lower()[:200]
+        if "role" in body:
+            if body["role"] not in ROLES:
+                raise HTTPException(400, "הרשאה לא מוכרת")
+            fields["role"] = body["role"]
+        if "disabled" in body:
+            fields["disabled"] = 1 if body["disabled"] else 0
+        keep_an_admin(u, fields.get("role"), bool(fields.get("disabled")))
+        if body.get("password"):
+            problem = password_problem(str(body["password"]), u["username"])
+            if problem:
+                raise HTTPException(400, problem)
+            fields["pw_hash"] = await run_in_threadpool(hash_password, str(body["password"]))
+        store.update_user(uid, **fields)
+        if fields.get("disabled") or "pw_hash" in fields:
+            me = current(request)
+            store.end_user_sessions(uid, keep_token=request.cookies.get(COOKIE) if me and me["id"] == uid else None)
+        return public_user(store.get_user(uid))
 
     # ------------------------------------------------------------------ sources
     @app.get("/api/sources")
@@ -1026,7 +1298,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             raise HTTPException(400, "סוג יעד לא מוכר")
         if body.get("decision") not in ("approve", "reject", "review", "ignore", ""):
             raise HTTPException(400, "החלטה לא מוכרת")
-        user = (body.get("user") or settings().get("user_name") or "").strip() or "משתמש"
+        user = actor(request, body.get("user") or "")
         ids = [t for t in (body.get("target_ids") or [body.get("target_id")]) if t]
         if body.get("master_uid") and (body["target_type"] != "group" or len(ids) != 1):
             raise HTTPException(400, "מק\"ט יעד אפשר לבחור רק לקבוצה אחת")

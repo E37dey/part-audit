@@ -48,7 +48,8 @@
 5. **חיפוש לפי צורה**: בכרטיס של כל חלק מופיעים החלקים הכי דומים לו בצורה, בכל המערכות ובלי קשר לשם או למק"ט – כדי למצוא חלק קיים שאפשר להשתמש בו שוב.
 6. **צמצום מגוון**: כמה מפרטים של חלקים תקניים בשימוש ותחת כמה מק"טים (למשל 23 מפרטים של בורג אלן ב-55 מק"טים), ומשפחות של חלקים מתוכננים לפי גודל, חומר ושימוש.
 7. **מגמות**: המספרים של כל סריקה לאורך זמן – כמה כפילויות נוצרו ונפתרו בכל סריקה, ואיך השתנו הכפילויות, המלאי על מק"טים כפולים ובעיות הנתונים. כל נקודה היא סריקה אמיתית.
-8. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
+8. **עבודה בצוות**: מחשב אחד מפעיל את "שרת הצוות" וכל אחד נכנס מהדפדפן עם משתמש וסיסמה (או עם חשבון החברה – Microsoft Entra ID, Google, Okta). שלוש הרשאות: צפייה, מהנדס (מחליט על כפילויות) ומנהל. ליד כל החלטה נרשם מי קיבל אותה.
+9. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
 
 > **חשוב:** החיבורים נכתבו לפי התיעוד הפומבי של כל יצרן, ונבדקו מול סימולטורים שמחקים את ה-API. הם עוד לא נבדקו מול שרת אמיתי של לקוח. רשימת הפרטים שעוד לא אומתו מופיעה בתוכנה, בכרטיס של כל מערכת.
 
@@ -168,6 +169,19 @@ changed in each source's mapping settings.
 * Variety reduction (`variety.py`, "צמצום מגוון"): standard parts by kind and specification (with the part numbers
   that carry each one, a diameter × length map for screws), designed parts by family (the main noun of the name in
   Hebrew or English); a duplicate group counts as one design; use = BOM lines in the PDM and the ERP. Counted only.
+* Team mode (`server/auth.py`, `server/oidc.py`; `python -m part_audit serve`, `python -m part_audit users ...`):
+  the default stays one computer, loopback only, nobody signs in. The team server listens on the network and every
+  request needs a signed-in user: viewer (sees and exports), engineer (also decisions, scans, pre-release checks),
+  admin (also sources, settings, users) - checked on the server for every endpoint (anything not listed needs admin).
+  Passwords: PBKDF2-HMAC-SHA256, 600,000 iterations, per-user salt; sessions are random tokens kept only as SHA-256
+  in the workspace database (HttpOnly, SameSite=Lax cookie; Secure over https; a week idle / 30 days at most);
+  5 wrong passwords for a user name (20 from one address) make sign-in wait 1 minute, doubling up to 15. Requests
+  that change something must come from the app's own page (Origin / Sec-Fetch-Site). The demo systems answer only
+  the server itself. Optional company sign-in with OpenID Connect (authorization code + PKCE S256, state bound to a
+  cookie, nonce; the ID token's RS256 signature checked in pure Python against the provider's published keys - keys
+  under 2048 bits refused - plus issuer, audience/azp, expiry, issued-at and nonce; allowed e-mail domains; new users
+  get viewer or engineer, never admin). Off by default; when on, the server contacts only the provider entered.
+  Tested against a provider simulated in the tests and against OpenSSL signatures; not yet against a real provider.
 * Trends (`GET /api/trends`, "מגמות"): every finished scan's numbers over time, what was created and resolved at
   each scan (from the comparison with the scan before), and the approved groups in effect at each scan. Points are
   scans; nothing is interpolated or extrapolated. Small SVG charts in `ui/js/chart.js`, no chart library.

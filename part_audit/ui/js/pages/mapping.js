@@ -29,11 +29,11 @@ export async function render({ el, setTitle, refreshStatus, state }) {
         <span style="flex:1"></span>
         <button class="btn primary" id="xls">${ICON.xls}ייצוא Excel לביצוע</button>
       </div>
-      <div class="panel-h" id="bulk" hidden style="background:var(--dye-soft)"><b id="bulk-n"></b>
+      <div class="panel-h need-engineer" id="bulk" hidden style="background:var(--dye-soft)"><b id="bulk-n"></b>
         <button class="btn ok small" data-b="approve">אשר</button><button class="btn bad small" data-b="reject">דחה</button>
         <button class="btn small" data-b="review">לבדיקה</button><button class="btn ghost small" data-b="clear">נקה בחירה</button></div>
-      <div class="table-wrap"><table class="t"><thead><tr><th class="sel-col"><input type="checkbox" id="all" aria-label="בחר הכול"></th>
-        <th>מק"ט קיים</th><th></th><th>מק"ט שנשאר</th><th>למה</th><th class="n">שימושים</th><th class="n">מלאי</th><th>החלטה</th><th></th></tr></thead>
+      <div class="table-wrap"><table class="t"><thead><tr><th class="sel-col need-engineer"><input type="checkbox" id="all" aria-label="בחר הכול"></th>
+        <th>מק"ט קיים</th><th></th><th>מק"ט שנשאר</th><th>למה</th><th class="n">שימושים</th><th class="n">מלאי</th><th>החלטה</th><th class="need-engineer"></th></tr></thead>
         <tbody id="tb"></tbody></table></div>
       <div class="panel-b small muted row" id="foot"></div>
     </div>`;
@@ -46,7 +46,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
   const draw = () => {
     const r = filtered();
     el.querySelector("#tb").innerHTML = r.slice(0, f.shown).map((m) => `<tr data-id="${m.id}">
-      <td class="sel-col"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="בחר"></td>
+      <td class="sel-col need-engineer"><input type="checkbox" data-sel="${m.id}" ${sel.has(m.id) ? "checked" : ""} aria-label="בחר"></td>
       <td>${uidLink(m.old_uid, pnChip(m.old_pn))}<div class="small">${esc(m.old_name)}</div><div class="small muted">${esc(m.old_source)}</div></td>
       <td class="muted" aria-hidden="true">←</td>
       <td>${uidLink(m.new_uid, pnChip(m.new_pn, true))}<div class="small">${esc(m.new_name)}</div>
@@ -55,7 +55,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
         <div class="muted" style="margin-top:3px">${esc(m.why_target_he)} · ביטחון ${confBar(m.confidence)} · <a href="#/group/${m.group_id}">לקבוצה</a></div></td>
       <td class="n">${n0(m.where_used)}</td><td class="n">${n0(m.erp_stock)}</td>
       <td>${decisionPill(m.decision)}${m.inherited ? '<div class="small muted">לפי הקבוצה</div>' : ""}</td>
-      <td class="nowrap"><button class="btn small ok" data-one="approve" title="אשר את השורה">✓</button> <button class="btn small bad" data-one="reject" title="דחה את השורה">✕</button></td></tr>`).join("")
+      <td class="nowrap need-engineer"><button class="btn small ok" data-one="approve" title="אשר את השורה">✓</button> <button class="btn small bad" data-one="reject" title="דחה את השורה">✕</button></td></tr>`).join("")
       || '<tr><td colspan="9"><div class="empty">אין שורות שמתאימות לסינון</div></td></tr>';
     el.querySelector("#foot").innerHTML = `מוצגות ${n0(Math.min(f.shown, r.length))} מתוך ${n0(r.length)}
       ${r.length > f.shown ? '<button class="btn small" id="more">הצג עוד</button>' : ""}`;

@@ -644,3 +644,44 @@ table.grid-map td i { position: absolute; top: 2px; inset-inline-end: 4px; font-
   .readout .r-value { font-size: 1.6rem; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* team server: sign-in screen and the signed-in user */
+.callout.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: var(--bad-soft); }
+.btn.block { display: flex; width: 100%; }
+.form.one { grid-template-columns: minmax(0, 1fr); }
+.login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(1100px 520px at 70% -10%, var(--dye-soft), transparent 60%), var(--bg); }
+.login-card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-frame);
+  padding: 28px 28px 22px; display: grid; gap: 14px; box-shadow: var(--shadow); }
+.login-card h1 { font-size: var(--fs-xl); margin: 4px 0 0; }
+.login-card p { margin: 0; }
+.login-brand { display: flex; align-items: center; gap: 11px; }
+.login-brand b { display: block; font-size: 1.05rem; }
+.login-brand span { font-size: var(--fs-xs); color: var(--muted); }
+.login-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: var(--fs-xs); }
+.login-or::before, .login-or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.login-err { min-height: 1.2em; color: var(--bad); }
+.login-note { display: flex; gap: 7px; align-items: flex-start; }
+.login-note svg { flex: none; width: 14px; height: 14px; margin-top: 3px; color: var(--ok); }
+.me { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 9px;
+  padding: 9px; border: 1px solid var(--rail-line); border-radius: var(--r-ctl); background: rgb(255 255 255 / 3%); }
+.me .me-acts { grid-column: 1 / -1; display: flex; gap: 4px; justify-content: flex-start; }
+.me .avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  background: var(--rail-active); color: var(--rail-ink); font-size: 0.85rem; }
+.me-who { min-width: 0; line-height: 1.3; }
+.me-who b { display: block; color: var(--rail-ink); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-who span { font-size: 0.7rem; color: var(--rail-muted); }
+.me .btn.ghost { color: var(--rail-muted); padding: 3px 6px; font-size: 0.72rem; }
+.me .btn.ghost:hover { background: var(--rail-hover); color: var(--rail-ink); }
+/* what a role may not do is not offered (the server refuses it anyway) */
+body[data-role="viewer"] .need-engineer, body[data-role="viewer"] .need-admin, body[data-role="engineer"] .need-admin { display: none !important; }
+.role-note { display: flex; gap: 8px; align-items: center; }
+.role-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.role-card { border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 10px 12px; background: var(--surface-2); display: grid; gap: 4px; }
+.role-card b { font-size: 0.9rem; }
+.role-card span { font-size: var(--fs-xs); color: var(--ink-2); line-height: 1.5; }
+.role-card.r-viewer { border-inline-start: 3px solid var(--info); }
+.role-card.r-engineer { border-inline-start: 3px solid var(--dye); }
+.role-card.r-admin { border-inline-start: 3px solid var(--brass); }
+ol.tight { margin: 6px 0 0; padding-inline-start: 20px; display: grid; gap: 3px; }
+@media screen and (max-width: 820px) { .role-cards { grid-template-columns: minmax(0, 1fr); } }

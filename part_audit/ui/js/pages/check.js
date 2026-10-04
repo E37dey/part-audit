@@ -1,7 +1,7 @@
 // Pre-release check: before a part number is opened, a new part's STEP file is compared with every part of the last
 // scan - the same file, the same shape (also in other units), a near-identical shape, a mirror image, the same
 // standard part, a planned part number that is already taken.
-import { get, send, binary, isStatic, uploadCheck } from "../api.js";
+import { get, send, binary, isStatic, uploadCheck, can } from "../api.js";
 import { esc, n0, secs, date, datetime, pnChip, sysBadge, catPill, confBar, uidLink, statePill, ICON, dims, cm3, shapeRows } from "../util.js";
 import { toast, confirmInline } from "../ui.js";
 import { compare3d } from "../compare3d.js";
@@ -43,7 +43,8 @@ async function intake({ el, state, setTitle, go }) {
   el.innerHTML = `
     <section class="panel">
       <div class="panel-h"><h2>האם החלק כבר קיים?</h2><span class="sub">גוררים את קובץ ה-STEP של החלק החדש ומקבלים תשובה תוך שניות</span></div>
-      ${isStatic ? `<div class="panel-b"><div class="callout">בגרסה המקוונת אי אפשר להעלות קבצים. למטה מוצגות בדיקות שהורצו בתוכנה על קבצים לדוגמה – לחצו על אחת מהן כדי לראות את התוצאה המלאה.</div></div>` : `
+      ${isStatic ? `<div class="panel-b"><div class="callout">בגרסה המקוונת אי אפשר להעלות קבצים. למטה מוצגות בדיקות שהורצו בתוכנה על קבצים לדוגמה – לחצו על אחת מהן כדי לראות את התוצאה המלאה.</div></div>`
+        : !can("engineer") ? `<div class="panel-b"><div class="callout">בדיקת חלק חדש זמינה למהנדסים. ההרשאה שלך היא צפייה – למטה אפשר לראות את הבדיקות שכבר נעשו.</div></div>` : `
       <div class="panel-b intake">
         <label class="drop" id="drop" tabindex="0" aria-describedby="drop-s">
           <input type="file" id="file" accept=".step,.stp,.STEP,.STP" hidden>
@@ -64,13 +65,13 @@ async function intake({ el, state, setTitle, go }) {
       <div class="panel-b run-box" id="run" hidden><div class="progress"><div style="width:4%"></div></div><div class="small" id="run-t"></div></div>`}
       <div class="panel-b intake-foot small muted">${esc(scope)}: אותו קובץ, אותה צורה (גם ביחידות אחרות), צורה כמעט זהה, תמונת מראה, אותו חלק תקני ומק"ט שכבר תפוס.
         הקובץ נשאר במחשב הזה ולא נשלח לשום מערכת.</div>
-      ${samples.length ? `<div class="panel-b samples"><span class="small muted">אין קובץ בהישג יד? נסו קובץ לדוגמה:</span>
+      ${samples.length && can("engineer") ? `<div class="panel-b samples"><span class="small muted">אין קובץ בהישג יד? נסו קובץ לדוגמה:</span>
         ${samples.map((x) => `<button class="btn small" data-sample="${esc(x.key)}" title="${esc(x.expect || "")}">${esc(x.title)}</button>`).join("")}</div>` : ""}
     </section>
     <section class="panel"><div class="panel-h"><h2>${isStatic ? "בדיקות לדוגמה" : "בדיקות אחרונות"}</h2><span class="sub">${rows.length ? `${n0(rows.length)} בדיקות` : ""}</span></div>
       <div id="hist">${history(rows)}</div></section>`;
   el.querySelectorAll("#hist tr[data-id]").forEach((tr) => (tr.onclick = () => go(`#/check/${tr.dataset.id}`)));
-  if (isStatic) return null;
+  if (isStatic || !can("engineer")) return null;
 
   let file = null, alive = true;
   const drop = el.querySelector("#drop"), input = el.querySelector("#file"), btn = el.querySelector("#go");
@@ -164,7 +165,7 @@ async function result({ el, param, setTitle, go }) {
     })();
     return () => { alive = false; if (inner) inner(); };
   }
-  const back = `<div class="row"><a class="btn" href="#/check">${ICON.inspect}בדיקה חדשה</a>${isStatic ? "" : `<span style="flex:1"></span><button class="btn ghost small" id="del">${ICON.trash}מחיקת הבדיקה</button>`}</div>`;
+  const back = `<div class="row"><a class="btn" href="#/check">${ICON.inspect}בדיקה חדשה</a>${isStatic || !can("engineer") ? "" : `<span style="flex:1"></span><button class="btn ghost small" id="del">${ICON.trash}מחיקת הבדיקה</button>`}</div>`;
   if (c.status === "error") {
     el.innerHTML = `<section class="verdict warn"><div class="v-mark">${ICON.caution}</div><div class="v-body"><h2>לא ניתן היה לבדוק את הקובץ</h2>
       <p>${esc(c.error)}</p></div></section>${back}`;

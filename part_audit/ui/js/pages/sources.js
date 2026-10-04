@@ -10,10 +10,10 @@ export async function render({ el, setTitle, refreshStatus, startScan, state }) 
   const erp = sources.filter((s) => byKind[s.kind]?.role === "erp");
   el.innerHTML = `
     <div class="row">
-      <button class="btn primary" id="scan">${ICON.play}סריקה חדשה של כל המקורות הפעילים</button>
-      <button class="btn" id="testall">בדוק את כל החיבורים</button>
-      <button class="btn" id="add">+ הוסף מקור</button>
-      ${state.status.demo_available && !state.status.demo_loaded ? '<button class="btn" id="demo">טען סביבת הדגמה</button>' : ""}
+      <button class="btn primary need-engineer" id="scan">${ICON.play}סריקה חדשה של כל המקורות הפעילים</button>
+      <button class="btn need-admin" id="testall">בדוק את כל החיבורים</button>
+      <button class="btn need-admin" id="add">+ הוסף מקור</button>
+      ${state.status.demo_available && !state.status.demo_loaded ? '<button class="btn need-admin" id="demo">טען סביבת הדגמה</button>' : ""}
       <span class="spacer"></span><span class="small muted">${sources.filter((s) => s.enabled).length} מקורות פעילים מתוך ${sources.length}</span>
     </div>
     ${sources.length ? "" : `<div class="panel"><div class="empty">עדיין לא חוברו מקורות. לחצו "הוסף מקור" או טענו את סביבת ההדגמה.</div></div>`}
@@ -64,7 +64,7 @@ function card(s, k) {
     ${t ? `<div class="test ${t.ok ? "ok" : "bad"}"><b>${t.ok ? "החיבור תקין" : "החיבור נכשל"}</b> · ${esc(t.message)}
         ${t.details ? `<div class="small muted">${Object.entries(t.details).filter(([, v]) => v != null).map(([a, b]) => `${esc(a)}: ${esc(b)}`).join(" · ")}</div>` : ""}
         <div class="small muted">${datetime(t.at)}${t.seconds != null ? ` · ${t.seconds} ש'` : ""}</div></div>` : '<div class="test small muted">עדיין לא נבדק</div>'}
-    <div class="actions">
+    <div class="actions need-admin">
       <button class="btn small" data-act="test" data-id="${s.id}">בדוק חיבור</button>
       <button class="btn small" data-act="discover" data-id="${s.id}" title="קורא מדגם קטן ומציע את מיפוי השדות">גילוי שדות</button>
       <button class="btn small" data-act="edit" data-id="${s.id}">הגדרות</button>
