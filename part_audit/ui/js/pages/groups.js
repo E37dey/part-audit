@@ -29,7 +29,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
         <b id="bulk-n"></b><button class="btn ok small" data-b="approve">אשר את המסומנות</button>
         <button class="btn bad small" data-b="reject">דחה את המסומנות</button><button class="btn small" data-b="review">סמן לבדיקה</button>
         <button class="btn ghost small" data-b="clear">נקה בחירה</button>
-        <span class="small muted">באישור מרוכז כל קבוצה מאושרת עם מק"ט היעד שלה: זה שנבחר בה קודם, או המוצע.</span></div>
+        <span class="small muted">באישור מרוכז כל קבוצה מאושרת עם המק"ט שמוצג לה ברשימה: יעד שאושר בה קודם, או המוצע.</span></div>
       <div class="table-wrap"><table class="t"><thead><tr><th class="sel-col"><input type="checkbox" id="all" aria-label="בחר הכול"></th>
         <th>חלק</th><th>סוג</th><th>מק"ט שנשאר</th><th>מק"טים כפולים</th><th>מערכות</th><th class="n">שימושים</th>
         <th class="n">מלאי במק"טים הכפולים</th><th class="n">ביטחון</th><th>החלטה</th></tr></thead><tbody id="tb"></tbody></table></div>

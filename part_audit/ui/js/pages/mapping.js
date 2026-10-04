@@ -50,7 +50,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
       <td>${uidLink(m.old_uid, pnChip(m.old_pn))}<div class="small">${esc(m.old_name)}</div><div class="small muted">${esc(m.old_source)}</div></td>
       <td class="muted" aria-hidden="true">←</td>
       <td>${uidLink(m.new_uid, pnChip(m.new_pn, true))}<div class="small">${esc(m.new_name)}</div>
-        ${m.target_overridden ? '<div class="small muted">יעד שנבחר על ידי המאשר</div>' : ""}</td>
+        ${m.target_overridden ? '<div class="small muted">היעד שאושר על ידי המאשר</div>' : ""}</td>
       <td class="small" style="min-width:280px" title="${esc(m.reason_he)}">${esc(m.reason_he.split(";")[0])}
         <div class="muted" style="margin-top:3px">${esc(m.why_target_he)} · ביטחון ${confBar(m.confidence)} · <a href="#/group/${m.group_id}">לקבוצה</a></div></td>
       <td class="n">${n0(m.where_used)}</td><td class="n">${n0(m.erp_stock)}</td>
