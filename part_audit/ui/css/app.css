@@ -493,6 +493,59 @@ input[type="checkbox"] { accent-color: var(--dye); width: 15px; height: 15px; }
   .v-body h2 { font-size: 1.35rem; }
 }
 
+/* ---------------------------------------------------------------- management report: a printable A4 sheet */
+/* the sheet is paper in both themes: the light tokens apply inside it, so chips and pills print well */
+.sheet { --surface: #ffffff; --surface-2: #f4f7f9; --surface-3: #e9eff4; --line: #dde4ea; --line-strong: #c3cfd8;
+  --ink: #132030; --ink-2: #344555; --muted: #5f7082; --dye: #2457e6; --brass: #8a5d0e; --brass-soft: rgb(196 140 40 / 13%);
+  --brass-line: rgb(160 110 20 / 45%); --bad: #c2352b; --ok: #12804e;
+  background: #fff; color: var(--ink); width: 100%; max-width: 210mm; margin: 0 auto; padding: 16mm 15mm 12mm;
+  border-radius: 4px; box-shadow: 0 1px 0 rgb(0 0 0 / 4%), 0 18px 50px rgb(0 0 0 / 35%); display: flex; flex-direction: column; gap: 22px;
+  font-size: 10.5pt; line-height: 1.55; }
+:root[data-theme="light"] .sheet { box-shadow: 0 1px 2px rgb(19 32 48 / 8%), 0 10px 30px rgb(19 32 48 / 10%); border: 1px solid var(--line); }
+.sheet h1 { font-size: 21pt; letter-spacing: -0.01em; line-height: 1.15; }
+.sheet h2 { font-size: 12.5pt; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1.5px solid var(--ink); }
+.sh-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 12px; border-bottom: 3px solid var(--ink); }
+.sh-kicker { font-size: 8.5pt; color: var(--muted); margin-bottom: 4px; }
+.sh-meta { font-size: 9pt; color: var(--ink-2); margin-top: 4px; }
+.sh-lead p { font-size: 12pt; line-height: 1.6; max-width: 70ch; }
+.sh-warn { color: var(--bad); font-size: 9.5pt !important; margin-top: 6px; }
+.sh-numbers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line-strong); }
+.sh-numbers .r-cell { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-inline-start: 1px solid var(--line); }
+.sh-numbers .r-cell:nth-child(4n+1) { border-inline-start: 0; }
+.sh-numbers .r-cell:nth-child(n+5) { border-top: 1px solid var(--line); }
+.sh-numbers .r-label { font-size: 8.5pt; color: var(--ink-2); }
+.sh-numbers .r-value { font-family: var(--mono); font-size: 17pt; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.sh-numbers .r-note { font-size: 7.5pt; color: var(--muted); }
+.sh-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+.sh-table th { text-align: right; font-weight: 600; font-size: 8pt; color: var(--ink-2); border-bottom: 1px solid var(--ink); padding: 4px 6px; }
+.sh-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.sh-table .n { text-align: left; }
+.sh-table td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; }
+.sh-table .chip { font-size: 7.5pt; padding: 0 5px; }
+.sh-list { margin: 0; padding-inline-start: 18px; display: grid; gap: 4px; }
+.sh-steps { margin: 0; padding-inline-start: 20px; display: grid; gap: 7px; }
+.sh-steps b { font-weight: 600; }
+.sh-small { font-size: 8.5pt; color: var(--ink-2); margin-top: 6px; }
+.sh-foot { font-size: 8pt; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 6px; }
+@media screen and (max-width: 820px) {
+  .sheet { padding: 18px 16px; }
+  .sh-numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sh-numbers .r-cell:nth-child(odd) { border-inline-start: 0; }
+  .sh-numbers .r-cell:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+@media print {
+  @page { size: A4; margin: 13mm 12mm; }
+  html, body { background: #fff !important; }
+  .rail, .topbar, .demo-banner, .no-print, .toasts, .modal-back { display: none !important; }
+  .app { display: block; }
+  .content { padding: 0; max-width: none; }
+  .sheet { box-shadow: none !important; border: 0 !important; padding: 0; max-width: none; border-radius: 0; }
+  .sheet section { break-inside: avoid; }
+  .sh-break { break-before: page; }
+  .sh-table thead { display: table-header-group; }
+  .sh-table tr { break-inside: avoid; }
+}
+
 /* ---------------------------------------------------------------- detail pages */
 .split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 16px; font-size: 0.875rem; margin: 0; }

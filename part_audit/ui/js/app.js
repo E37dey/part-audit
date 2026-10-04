@@ -10,6 +10,7 @@ const PAGES = {
   quality: () => import("./pages/findings.js"), erp: () => import("./pages/findings.js"), mapping: () => import("./pages/mapping.js"),
   parts: () => import("./pages/parts.js"), part: () => import("./pages/part.js"), settings: () => import("./pages/settings.js"),
   guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"), changes: () => import("./pages/changes.js"),
+  report: () => import("./pages/report.js"),
 };
 // the navigation follows the work: connect the systems, go through the findings, decide
 const NAV = [
@@ -19,7 +20,7 @@ const NAV = [
     ["names", "שמות ומק\"טים", ICON.tag, "name_findings"], ["quality", "איכות נתונים", ICON.check, "quality_issues"],
     ["erp", "ERP מול PDM", ICON.erp, "erp_issues"]]],
   ["3", "החלטה", [["mapping", "מיפוי ואישורים", ICON.map, "pending"]]],
-  ["", "כלים", [["check", "בדיקת חלק חדש", ICON.inspect], ["parts", "חיפוש חלקים", ICON.search]]],
+  ["", "כלים", [["check", "בדיקת חלק חדש", ICON.inspect], ["parts", "חיפוש חלקים", ICON.search], ["report", "דוח להנהלה", ICON.report]]],
 ];
 export const state = { status: null, summary: null };
 let cleanup = null;

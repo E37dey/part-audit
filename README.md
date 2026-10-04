@@ -44,7 +44,8 @@
 | כל ERP אחר | קובץ יצוא Excel או CSV |
 
 3. **סריקה קבועה**: בהגדרות קובעים סריקה אוטומטית (למשל כל יום ראשון ב-06:00). המסך "מה השתנה" מראה אחרי כל סריקה מה נוסף מאז הקודמת: כפילויות חדשות, קבוצות שנפתרו, ממצאים חדשים ומה תוקן. אפשר גם לקבל את זה במייל (כבוי כברירת מחדל). כשהתוכנה סגורה, ב-Windows אפשר להפעיל את `PartAudit-Rescan.bat` ממתזמן המשימות.
-4. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
+4. **דוח להנהלה**: מסמך של שני עמודים (A4) עם המספרים שנמדדו, איפה הכפילויות, מה השתנה ומה מומלץ. מדפיסים או שומרים כ-PDF מהדפדפן.
+5. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
 
 > **חשוב:** החיבורים נכתבו לפי התיעוד הפומבי של כל יצרן, ונבדקו מול סימולטורים שמחקים את ה-API. הם עוד לא נבדקו מול שרת אמיתי של לקוח. רשימת הפרטים שעוד לא אומתו מופיעה בתוכנה, בכרטיס של כל מערכת.
 
@@ -156,6 +157,9 @@ changed in each source's mapping settings.
   removed / changed. A source that could not be read is left out (its records are "not read", never "removed").
   Optional e-mail of the changes (off by default; only through the SMTP server the user enters; the password is
   kept in the OS credential store).
+* Management report (`#/report`): a two-page A4 document of the measured numbers (print or save as PDF in the
+  browser; also in the online copy). A saving per year appears only when the user entered their own cost
+  assumption, and it is labelled as such.
 * Pre-release check (`part_audit/precheck.py`): one new STEP file against the latest scan, with the scan's own
   engine and thresholds (hashes, geometry incl. unit mistakes, aligned surfaces, standard-part spec, names, the
   planned part number in every record and in the ERP). The answer names the part number to use; if the part is
