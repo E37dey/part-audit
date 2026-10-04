@@ -39,9 +39,10 @@ def icon(path: Path) -> None:
     brass, w = (226, 180, 94, 255), int(2.6 * s)
     pts = [(9 * s, 23 * s), (9 * s, 9 * s), (17.6 * s, 9 * s)]
     d.line(pts, fill=brass, width=w, joint="curve")
-    d.arc((12.6 * s, 9 * s, 22.6 * s, 19 * s), start=-90, end=90, fill=brass, width=w)
+    # Pillow strokes an arc inside its box: grow the box by half the width to centre the stroke on the radius
+    d.arc((12.6 * s - w / 2, 9 * s - w / 2, 22.6 * s + w / 2, 19 * s + w / 2), start=-90, end=90, fill=brass, width=w)
     d.line([(17.6 * s, 19 * s), (13 * s, 19 * s)], fill=brass, width=w)
-    for x, y in ((9, 23), (13, 19)):         # round line ends
+    for x, y in ((9, 23), (13, 19), (17.6, 9), (17.6, 19), (9, 9)):   # round line ends and joints
         d.ellipse((x * s - w / 2, y * s - w / 2, x * s + w / 2, y * s + w / 2), fill=brass)
     d.ellipse((20.3 * s, 20.3 * s, 24.7 * s, 24.7 * s), fill=(91, 140, 255, 255))
     path.parent.mkdir(parents=True, exist_ok=True)
