@@ -61,6 +61,36 @@ class WindchillWrs(Connector):
         finally:
             h.close()
 
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        try:
+            data = h.json("GET", f"{self._dom('ProdMgmt')}/Parts", params={"$top": n, "$count": "true",
+                                                                          "ptc.search.latestversion": "true"})
+            parts = data.get("value", [])
+            rows = [{k: v for k, v in p.items() if not k.startswith("@")} for p in parts]
+            # STEP files: a few parts are checked through their CAD document's representations (no download)
+            checked = found = 0
+            for p in parts[:10]:
+                try:
+                    assoc = h.json("GET", f"{self._dom('ProdMgmt')}/Parts('{quote(p['ID'], safe=':')}')/PartDocAssociations",
+                                   params={"$expand": "RelatedCADDoc"})
+                    cad = next((a["RelatedCADDoc"] for a in assoc.get("value", []) if a.get("RelatedCADDoc")), None)
+                    if cad and ((cad.get("Category") or {}).get("Value") == "CADASSEMBLY"):
+                        continue
+                    checked += 1
+                    if cad:
+                        reps = h.json("GET", f"{self._dom('CADDocumentMgmt')}/CADDocuments('{quote(cad['ID'], safe=':')}')/Representations")
+                        found += any(str(f.get("Format", "")).upper() == "STEP"
+                                     or str(f.get("FileName") or f.get("Label") or "").lower().endswith(STEP_EXT)
+                                     for r in reps.get("value", []) for f in (r.get("AdditionalFiles") or []))
+                except ConnectorError:
+                    pass
+            return {"rows": rows, "api_calls": h.calls, "step": {"checked": checked, "found": found},
+                    "notes": [f"ב-Windchill {data.get('@odata.count', '?')} WTParts; נדגמו {len(rows)}",
+                              "קבצי STEP נבדקו ב-10 החלקים הראשונים במדגם"]}
+        finally:
+            h.close()
+
     def collect(self) -> Collected:
         out = Collected()
         c = self.cfg

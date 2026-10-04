@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..model import PartRecord, classify_state
-from .base import CAD_ASM_EXT, CAD_PART_EXT, STEP_EXT, Collected, Connector, Field, mass_to_kg, stem_key
+from .base import CAD_ASM_EXT, CAD_PART_EXT, STEP_EXT, Collected, Connector, Field, mass_to_kg, spread, stem_key
 from .http import ConnectorError, ReadOnlyHttp
 
 
@@ -86,6 +86,38 @@ class VaultRest(Connector):
                 msg = "ה-REST API לא נמצא – נדרש Vault Server 2025.2 ומעלה (בגרסאות קודמות יש להשתמש ב-SDK)"
             return {"ok": False, "message": msg, "details": {"status": exc.status}}
         finally:
+            h.close()
+
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        sid = ""
+        try:
+            sid, vid = self._login(h)
+            defs = {}
+            for page in self._pages(h, f"vaults/{vid}/property-definitions", {"limit": 1000}):
+                for d in page.get("results", []):
+                    defs[d["id"]] = d.get("displayName") or d.get("systemName")
+            fvs, pages, total = [], 0, None
+            for page in self._pages(h, f"vaults/{vid}/file-versions",
+                                    {"limit": int(self.cfg.get("page_size") or 500), "option[propDefIds]": "all",
+                                     "option[latestOnly]": "true"}):
+                fvs.extend(page.get("results", []))
+                total = (page.get("pagination") or {}).get("totalResults", total)
+                pages += 1
+                if pages >= 6:          # enough for a sample; a scan reads everything
+                    break
+            native = [f for f in fvs if f["name"].lower().endswith(CAD_PART_EXT + CAD_ASM_EXT)]
+            steps = {stem_key(f["name"]) for f in fvs if f["name"].lower().endswith(STEP_EXT)}
+            pick = spread(native, n)
+            rows = [{defs.get(p["propertyDefinitionId"], p["propertyDefinitionId"]): p.get("value")
+                     for p in f.get("properties", [])} for f in pick]
+            parts = [f for f in pick if f["name"].lower().endswith(CAD_PART_EXT)]
+            notes = [f"נקראו {len(fvs)} מתוך {total if total is not None else '?'} גרסאות קבצים; נדגמו {len(pick)} קבצי CAD"]
+            return {"rows": rows, "api_calls": h.calls, "notes": notes,
+                    "step": {"checked": len(parts), "found": sum(1 for f in parts if stem_key(f["name"]) in steps)}}
+        finally:
+            if sid:
+                self._logout(h, sid)
             h.close()
 
     def collect(self) -> Collected:

@@ -287,6 +287,18 @@ def test_api_flow(client, plant):
     assert "PartAudit" in client.get("/").text
 
 
+def test_field_discovery_api(client):
+    """Pilot kit: a sample of a folder and of an ERP file, stored and returned again; nothing is changed."""
+    srcs = {s["kind"]: s for s in client.get("/api/sources").json()}
+    before = client.get("/api/sources").json()
+    d = client.post(f"/api/sources/{srcs['folder']['id']}/discover").json()
+    assert d["records"] >= 5 and d["step"]["checked"] >= 5 and any("קבצי STEP" in n for n in d["notes"])
+    e = client.post(f"/api/sources/{srcs['erp_file']['id']}/discover").json()
+    assert e["records"] == 5 and any("עמודות שזוהו" in n for n in e["notes"])
+    assert client.get(f"/api/sources/{srcs['erp_file']['id']}/discovery").json()["records"] == 5
+    assert client.get("/api/sources").json() == before
+
+
 def test_only_this_computer_and_this_page(client):
     assert client.get("/api/status", headers={"host": "attacker.example:8765"}).status_code == 403
     r = client.post("/api/sources", json={"kind": "folder", "name": "x", "config": {"path": "/tmp"}},

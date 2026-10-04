@@ -120,6 +120,11 @@ async function staticGet(path, params = {}) {
   if (p === "settings") return (await staticJson("status.json")).settings;
   if (p === "runs") return staticJson("runs.json");
   if (p === "decisions") return [...memDecisions].reverse();
+  if ((m = p.match(/^sources\/([^/]+)\/discovery$/))) {
+    const x = (await staticJson("discovery.json"))[decodeURIComponent(m[1])];
+    if (!x) throw new Error("גילוי שדות לא נכלל בגרסת ההדגמה המקוונת למקור הזה");
+    return x;
+  }
   if ((m = p.match(/^runs\/[^/]+\/summary$/))) {
     const s = await staticJson("summary.json");
     // the ten groups with the most stock on duplicate part numbers, after the decisions made in this tab

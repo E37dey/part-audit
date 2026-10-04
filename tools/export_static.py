@@ -161,6 +161,13 @@ def main() -> None:
     dump(data / "sources.json", [{**s, "config": {k: v for k, v in s["config"].items() if k == "vault"}}
                                  for s in get("/api/sources")])
     dump(data / "runs.json", get("/api/runs"))
+    # field discovery results stored by the app (pilot kit), shown read-only online
+    disc = {}
+    for src in get("/api/sources"):
+        r = client.get(f"/api/sources/{src['id']}/discovery")
+        if r.status_code == 200:
+            disc[src["id"]] = r.json()
+    dump(data / "discovery.json", disc)
     summary = get("/api/runs/latest/summary")
     summary["sources"] = [{k: v for k, v in x.items() if k != "url"} for x in summary["sources"]]   # no addresses
     dump(data / "summary.json", summary)

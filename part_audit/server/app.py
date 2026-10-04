@@ -267,6 +267,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     @app.delete("/api/sources/{sid}")
     def delete_source(sid: str):
         store.delete_source(sid)
+        discovery_file(sid).unlink(missing_ok=True)
         return {"ok": True}
 
     @app.post("/api/sources/{sid}/test")
@@ -283,6 +284,43 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         res["seconds"] = round(time.time() - t0, 2)
         store.set_test_result(sid, res)
         return res
+
+    # ------------------------------------------------------------------ pilot: field discovery
+    def discovery_file(sid: str) -> Path:
+        return store.ws / "discovery" / f"{re.sub(r'[^A-Za-z0-9_.-]+', '_', sid)}.json"
+
+    @app.post("/api/sources/{sid}/discover")
+    def discover_source(sid: str):
+        """Read a small sample (no file downloads) and suggest the field mapping; nothing is changed."""
+        from ..discovery import analyze
+        src = store.get_source(sid, with_secrets=True)
+        if not src:
+            raise HTTPException(404, "המקור לא נמצא")
+        C = connectors.get(src["kind"])
+        t0 = time.time()
+        conn = C(sid, src["name"], src["config"], store.ws / "cache" / "connectors")
+        try:
+            smp = conn.sample(40)
+        except NotImplementedError:
+            raise HTTPException(400, "גילוי שדות לא זמין לסוג החיבור הזה")
+        except Exception as exc:
+            raise HTTPException(502, f"קריאת המדגם נכשלה: {exc}")
+        res = analyze(C, conn.cfg, smp)
+        res.update({"source": {"id": sid, "name": src["name"], "kind": src["kind"], "title": C.title,
+                               "interface": C.interface, "simulated": src["simulated"]},
+                    "seconds": round(time.time() - t0, 2), "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "pn_regex": smp.get("pn_regex"), "pn_found": smp.get("pn_found"), "files": smp.get("files")})
+        f = discovery_file(sid)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
+        return res
+
+    @app.get("/api/sources/{sid}/discovery")
+    def last_discovery(sid: str):
+        f = discovery_file(sid)
+        if not f.exists():
+            raise HTTPException(404, "עדיין לא בוצע גילוי שדות למקור הזה")
+        return json.loads(f.read_text(encoding="utf-8"))
 
     @app.post("/api/upload")
     async def upload(file: UploadFile = File(...)):

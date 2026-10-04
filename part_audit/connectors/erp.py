@@ -84,6 +84,24 @@ class PriorityErp(Connector):
         finally:
             h.close()
 
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        try:
+            rows = h.json("GET", "LOGPART", params={"$top": n}).get("value", [])
+            notes = [f"נקראו {len(rows)} כרטיסי פריט (LOGPART) עם כל השדות"]
+            if self.cfg.get("stock_form"):
+                try:
+                    st = h.json("GET", self.cfg["stock_form"], params={"$top": 3}).get("value", [])
+                    qf = self.cfg.get("stock_qty_field") or "BALANCE"
+                    notes.append(f"טופס יתרות {self.cfg['stock_form']}: " + ("השדה " + qf + " קיים" if st and qf in st[0]
+                                                                              else f"השדה {qf} לא נמצא – שדות: " + ", ".join(list(st[0])[:12]) if st else "אין שורות"))
+                except ConnectorError as exc:
+                    notes.append(f"טופס היתרות {self.cfg['stock_form']} לא נקרא: {exc}")
+            return {"rows": [{k: v for k, v in r.items() if not k.endswith("_SUBFORM")} for r in rows],
+                    "api_calls": h.calls, "notes": notes}
+        finally:
+            h.close()
+
     def collect(self) -> Collected:
         out = Collected()
         c = self.cfg
@@ -183,6 +201,17 @@ class SapS4(Connector):
             out.extend(d.get("results", []))
             url = d.get("__next")
         return out
+
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        try:
+            data = h.json("GET", "API_PRODUCT_SRV/A_Product", params={"$top": n, "$format": "json", "$inlinecount": "allpages"})
+            d = data.get("d", {})
+            rows = [{k: v for k, v in r.items() if not k.startswith("__") and not k.startswith("to_")} for r in d.get("results", [])]
+            return {"rows": rows, "api_calls": h.calls,
+                    "notes": [f"ב-S/4HANA {d.get('__count', '?')} מוצרים; נקראו {len(rows)} עם כל השדות של A_Product"]}
+        finally:
+            h.close()
 
     def test(self) -> dict:
         h = self._http()
@@ -324,6 +353,22 @@ class SapB1(Connector):
                                 "קריאות API": h.calls}}
         except ConnectorError as exc:
             return {"ok": False, "message": str(exc), "details": {"status": exc.status}}
+        finally:
+            h.close()
+
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        try:
+            self._login(h)
+            data = h.json("GET", "Items", params={"$top": n, "$inlinecount": "allpages"})
+            rows = [{k: v for k, v in r.items() if not k.startswith("odata") and not isinstance(v, (list, dict))}
+                    for r in data.get("value", [])]
+            try:
+                h.post("Logout")
+            except ConnectorError:
+                pass
+            return {"rows": rows, "api_calls": h.calls,
+                    "notes": [f"ב-SAP Business One {data.get('odata.count', '?')} פריטים; נקראו {len(rows)} עם כל השדות"]}
         finally:
             h.close()
 

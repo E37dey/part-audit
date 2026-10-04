@@ -4,7 +4,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from ..model import PartRecord, classify_state
-from .base import STEP_EXT, Collected, Connector, Field, mass_to_kg
+from .base import STEP_EXT, Collected, Connector, Field, mass_to_kg, spread
 from .http import ConnectorError, ReadOnlyHttp
 
 READ_OPS = [
@@ -13,6 +13,7 @@ READ_OPS = [
     "Core-2006-03-DataManagement/getProperties", "Core-2007-09-DataManagement/expandGRMRelationsForPrimary",
     "Core-2006-03-FileManagement/getFileReadTickets", "Cad-2007-01-StructureManagement/createBOMWindows",
     "Cad-2007-01-StructureManagement/expandPSOneLevel", "Cad-2007-01-StructureManagement/closeBOMWindows",
+    "Core-2011-06-Session/getTypeDescriptions2",
 ]
 REV_PROPS = ["item_id", "object_name", "object_desc", "item_revision_id", "release_status_list", "owning_user",
              "creation_date", "last_mod_date", "structure_revisions", "IMAN_specification"]
@@ -99,6 +100,61 @@ class TeamcenterRest(Connector):
         finally:
             h.close()
 
+    def _query(self, h: ReadOnlyHttp) -> list[dict]:
+        c = self.cfg
+        qs = self._soa(h, "Query-2006-03-SavedQuery/getSavedQueries").get("queries", [])
+        q = next((x for x in qs if x.get("name") == c["query_name"]), None)
+        if not q:
+            raise ConnectorError(f"השאילתה השמורה '{c['query_name']}' לא נמצאה")
+        res = self._soa(h, "Query-2008-06-SavedQuery/executeSavedQueries", {"input": [{
+            "query": q["query"], "entries": [c["query_entry"]], "values": [c["query_value"]], "maxNumToReturn": 0,
+            "maxNumToInflate": 0, "limitListCount": 0, "limitList": []}]})
+        return [o for r in res.get("arrayOfResults", []) for o in r.get("objects", [])]
+
+    def sample(self, n: int = 40) -> dict:
+        c = self.cfg
+        h = self._http()
+        notes = []
+        try:
+            self._login(h)
+            all_revs = self._query(h)
+            revs = spread(all_revs, n)
+            names = list(dict.fromkeys(REV_PROPS + [c[k] for k in ("prop_material", "prop_mass", "prop_finish",
+                                                                   "prop_make_buy") if c.get(k)]))
+            try:   # the property names of Item Revision (type metadata, read-only)
+                td = self._soa(h, "Core-2011-06-Session/getTypeDescriptions2",
+                               {"typeNames": ["ItemRevision"], "options": {}})
+                for t in td.get("types", []):
+                    pds = t.get("propertyDescriptors") or {}
+                    for pd in (pds.values() if isinstance(pds, dict) else pds):
+                        if isinstance(pd, dict) and pd.get("name"):
+                            names.append(pd["name"])
+                names = list(dict.fromkeys(names))
+            except ConnectorError:
+                notes.append("רשימת המאפיינים של Item Revision לא זמינה – נבדקו המאפיינים הידועים והממופים בלבד")
+            sd = self._soa(h, "Core-2006-03-DataManagement/getProperties", {"objects": revs, "attributes": names})
+            mos = sd.get("modelObjects", {})
+            skip = {"structure_revisions", "IMAN_specification", "release_status_list", "owning_user", "items_tag"}
+            rows = [{k: _first(_ui(mos.get(r["uid"], {}), k)) for k in names if k not in skip} for r in revs]
+            g = self._soa(h, "Core-2007-09-DataManagement/expandGRMRelationsForPrimary", {
+                "primaryObjects": revs, "pref": {"expItemRev": False, "returnRelations": False,
+                                                 "info": [{"relationTypeName": "IMAN_specification", "otherSideObjectTypes": []}]}},
+                policy={"types": [{"name": "Dataset", "properties": [{"name": "object_type"}]}]})
+            ds_mos = (g.get("ServiceData") or {}).get("modelObjects", {})
+            found = 0
+            for o in g.get("output", []):
+                kinds = {(ds_mos.get(ro["otherSideObject"]["uid"]) or {}).get("type", "") for rd in o.get("relationshipData", [])
+                         for ro in rd.get("relationshipObjects", [])}
+                found += any(str(k).upper() == "STEP" for k in kinds)
+            notes.insert(0, f"השאילתה '{c['query_name']}' החזירה {len(all_revs)} Item Revisions; נדגמו {len(revs)}")
+            try:
+                self._soa(h, "Core-2006-03-Session/logout")
+            except ConnectorError:
+                pass
+            return {"rows": rows, "api_calls": h.calls, "notes": notes, "step": {"checked": len(revs), "found": found}}
+        finally:
+            h.close()
+
     def collect(self) -> Collected:
         out = Collected()
         c = self.cfg
@@ -106,14 +162,7 @@ class TeamcenterRest(Connector):
         try:
             self.progress("מתחבר ל-Siemens Teamcenter", 0, 0)
             self._login(h)
-            qs = self._soa(h, "Query-2006-03-SavedQuery/getSavedQueries").get("queries", [])
-            q = next((x for x in qs if x.get("name") == c["query_name"]), None)
-            if not q:
-                raise ConnectorError(f"השאילתה השמורה '{c['query_name']}' לא נמצאה")
-            res = self._soa(h, "Query-2008-06-SavedQuery/executeSavedQueries", {"input": [{
-                "query": q["query"], "entries": [c["query_entry"]], "values": [c["query_value"]], "maxNumToReturn": 0,
-                "maxNumToInflate": 0, "limitListCount": 0, "limitList": []}]})
-            revs = [o for r in res.get("arrayOfResults", []) for o in r.get("objects", [])]
+            revs = self._query(h)
             attrs = REV_PROPS + [c["prop_material"], c["prop_mass"], c["prop_finish"], c["prop_make_buy"]]
             mos: dict[str, dict] = {}
             for i in range(0, len(revs), 200):

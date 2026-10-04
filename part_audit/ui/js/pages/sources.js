@@ -1,5 +1,5 @@
 import { get, send, upload, isStatic } from "../api.js";
-import { esc, sysColor, sysCode, datetime, ICON } from "../util.js";
+import { esc, sysColor, sysCode, datetime, ICON, n0 } from "../util.js";
 import { modal, toast, confirmInline } from "../ui.js";
 
 export async function render({ el, setTitle, refreshStatus, startScan, state }) {
@@ -66,6 +66,7 @@ function card(s, k) {
         <div class="small muted">${datetime(t.at)}${t.seconds != null ? ` · ${t.seconds} ש'` : ""}</div></div>` : '<div class="test small muted">עדיין לא נבדק</div>'}
     <div class="actions">
       <button class="btn small" data-act="test" data-id="${s.id}">בדוק חיבור</button>
+      <button class="btn small" data-act="discover" data-id="${s.id}" title="קורא מדגם קטן ומציע את מיפוי השדות">גילוי שדות</button>
       <button class="btn small" data-act="edit" data-id="${s.id}">הגדרות</button>
       <button class="btn small" data-act="toggle" data-id="${s.id}">${s.enabled ? "השבת" : "הפעל"}</button>
       <button class="btn small ghost" data-act="delete" data-id="${s.id}">מחק</button>
@@ -73,6 +74,7 @@ function card(s, k) {
 }
 
 async function act(what, s, byKind, refresh, btn) {
+  if (what === "discover") { discover(s, byKind[s.kind], refresh); return; }
   if (isStatic && what !== "edit") { toast("בגרסת ההדגמה המקוונת אין חיבור למערכות – הפעולה זמינה באפליקציה המקומית"); return; }
   if (what === "test") {
     btn.disabled = true; btn.textContent = "בודק…";
@@ -149,4 +151,89 @@ function form(k, s, refresh) {
     try { const r = await upload(up.files[0]); m.body.querySelector("#f-path").value = r.path; toast(`הקובץ ${r.name} הועלה`); }
     catch (e) { toast(e.message, true); }
   };
+}
+
+// ------------------------------------------------------------------ pilot: field discovery
+const pctTxt = (x) => (x == null ? "—" : `${Math.round(100 * x)}%`);
+const fillPill = (x, found = true) => (!found ? '<span class="pill bad">לא נמצא</span>'
+  : `<span class="pill ${x >= 0.8 ? "ok" : x >= 0.3 ? "warn" : "bad"}">${pctTxt(x)}</span>`);
+const exChips = (xs) => (xs || []).slice(0, 3).map((x) => `<span class="chip">${esc(x)}</span>`).join(" ") || '<span class="muted">—</span>';
+
+async function discover(s, k, refresh) {
+  const m = modal({ title: `גילוי שדות – ${s.name}`, wide: true, body: `<div class="stack">
+    <p class="muted">קורא מדגם של עד 40 רשומות מ-${esc(k.title)}. קריאה בלבד, בלי להוריד קבצים.</p>
+    <div class="progress"><div style="width:40%"></div></div></div>` });
+  let d;
+  try { d = isStatic ? await get(`/api/sources/${s.id}/discovery`) : await send("POST", `/api/sources/${s.id}/discover`); }
+  catch (e) { m.body.innerHTML = `<div class="callout warn">${esc(e.message)}</div>`; return; }
+  const sugg = d.mapping.filter((f) => f.suggested);
+  const rx = d.pn_regex && d.pn_regex.matched > (d.pn_found || 0) ? d.pn_regex : null;
+  m.body.innerHTML = `<div class="stack" style="gap:16px">
+    <div class="readout mini" style="--cells:4">
+      <div class="cell"><span class="r-label">רשומות במדגם</span><span class="r-value">${n0(d.records)}</span></div>
+      <div class="cell"><span class="r-label">עם קובץ STEP</span><span class="r-value">${d.step ? `${n0(d.step.found)}/${n0(d.step.checked)}` : "—"}</span></div>
+      <div class="cell"><span class="r-label">מאפיינים שנמצאו</span><span class="r-value">${n0(d.properties.length)}</span></div>
+      <div class="cell"><span class="r-label">קריאות API</span><span class="r-value">${d.api_calls == null ? "—" : n0(d.api_calls)}</span></div>
+    </div>
+    ${d.notes.length ? `<ul class="small muted" style="margin:0;padding-inline-start:18px">${d.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+    ${d.warnings.map((w) => `<div class="callout warn small">${esc(w)}</div>`).join("")}
+    ${d.mapping.length ? `<div><h3 style="margin-bottom:8px">מיפוי שדות</h3>
+      <div class="table-wrap"><table class="t"><thead><tr><th>בתוכנה</th><th>המאפיין שמוגדר עכשיו</th><th>מילוי</th><th>הצעה</th><th>דוגמאות</th><th>להחיל</th></tr></thead><tbody>
+      ${d.mapping.map((f, i) => `<tr><td><b>${esc(f.target_he)}</b><div class="small muted">${esc(f.label)}</div></td>
+        <td><span class="mono small ltr">${esc(f.current || "—")}</span><div class="small muted">${exChips(f.current_examples)}</div></td>
+        <td>${fillPill(f.current_fill, f.current_found)}</td>
+        <td>${f.suggested ? `<span class="mono small ltr">${esc(f.suggested)}</span> <span class="pill ${f.confidence === "high" ? "ok" : "warn"} plain">${f.confidence === "high" ? "התאמה טובה" : "התאמה חלקית"}</span>
+          <div class="small muted">מילוי ${pctTxt(f.suggested_fill)}</div>` : '<span class="small muted">המיפוי הנוכחי מתאים</span>'}</td>
+        <td>${f.suggested ? exChips(f.suggested_examples) : ""}</td>
+        <td>${f.suggested ? `<input type="checkbox" data-apply="${i}" checked aria-label="להחיל">` : ""}</td></tr>`).join("")}
+      </tbody></table></div></div>` : ""}
+    ${rx ? `<div class="callout small"><b>תבנית מק"ט בשם הקובץ:</b> <span class="mono ltr">${esc(rx.regex)}</span> מזהה מק"ט ב-${n0(rx.matched)} מתוך ${n0(rx.of)} הקבצים
+      (היום: ${n0(d.pn_found)}). <label class="check" style="display:inline-flex;margin-inline-start:8px"><input type="checkbox" id="apply-rx" checked> להחיל</label></div>` : ""}
+    <details><summary><b>כל המאפיינים שנמצאו</b> <span class="small muted">(${n0(d.properties.length)})</span></summary>
+      <div class="table-wrap" style="max-height:340px;margin-top:8px"><table class="t"><thead><tr><th>מאפיין</th><th>מילוי</th><th class="n">ערכים שונים</th><th>דוגמאות</th></tr></thead><tbody>
+      ${d.properties.map((p) => `<tr><td class="mono small ltr">${esc(p.name)}</td><td>${fillPill(p.fill)}</td><td class="n">${n0(p.distinct)}</td><td class="small">${exChips(p.examples)}</td></tr>`).join("")}
+      </tbody></table></div></details>
+    <div class="row">
+      <button class="btn primary" id="apply" ${sugg.length || rx ? "" : "disabled"}>החל את ההצעות שסומנו</button>
+      <button class="btn" id="report">הורד דוח חיבור</button>
+      <span class="small muted">נבדק ${datetime(d.at)}${d.seconds != null ? `, ${d.seconds} ש'` : ""}</span>
+    </div></div>`;
+  m.body.querySelector("#report").onclick = () => downloadReport(d);
+  m.body.querySelector("#apply").onclick = async () => {
+    if (isStatic) { toast("בגרסה המקוונת אפשר רק לראות את ההצעות; החלה זמינה באפליקציה המקומית"); return; }
+    const config = { ...s.config };
+    m.body.querySelectorAll("[data-apply]").forEach((cb) => { if (cb.checked) { const f = d.mapping[+cb.dataset.apply]; config[f.field] = f.suggested; } });
+    if (rx && m.body.querySelector("#apply-rx")?.checked) config.pn_regex = rx.regex;
+    try {
+      await send("PUT", `/api/sources/${s.id}`, { config });
+      toast("המיפוי עודכן. הסריקה הבאה תשתמש בו.");
+      m.close(); await refresh();
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+// a self-contained Hebrew report of the discovery, to keep or send to whoever helps with the connection
+function downloadReport(d) {
+  if (isStatic) { toast("הורדת הדוח זמינה באפליקציה המקומית"); return; }
+  const rows = (xs, f) => xs.map(f).join("");
+  const html = `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>דוח חיבור – ${esc(d.source.name)}</title>
+<style>body{font-family:Arial,sans-serif;margin:32px;color:#132030}h1{font-size:22px}h2{font-size:16px;margin-top:24px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #c3cfd8;padding:5px 8px;text-align:right;vertical-align:top}
+th{background:#eef2f5}.m{font-family:Consolas,monospace;direction:ltr;unicode-bidi:isolate}.w{background:#fff4e0;padding:6px 10px;margin:6px 0}</style></head><body>
+<h1>דוח חיבור: ${esc(d.source.name)}</h1>
+<p>מערכת: ${esc(d.source.title)} (${esc(d.source.interface)})${d.source.simulated ? " – סימולטור הדגמה" : ""}<br>
+נבדק: ${esc(String(d.at).replace("T", " "))}. מדגם: ${d.records} רשומות${d.step ? `, קובץ STEP ל-${d.step.found} מתוך ${d.step.checked}` : ""}.
+הדוח נוצר במחשב הזה ולא נשלח לשום מקום. אין בו סיסמאות.</p>
+${d.notes.map((n) => `<p>${esc(n)}</p>`).join("")}${d.warnings.map((w) => `<div class="w">${esc(w)}</div>`).join("")}
+<h2>מיפוי שדות</h2><table><tr><th>בתוכנה</th><th>מאפיין מוגדר</th><th>מילוי</th><th>הצעה</th><th>דוגמאות</th></tr>
+${rows(d.mapping, (f) => `<tr><td>${esc(f.target_he)}</td><td class="m">${esc(f.current)}</td><td>${f.current_found ? pctTxt(f.current_fill) : "לא נמצא"}</td>
+<td class="m">${esc(f.suggested || "—")}</td><td>${esc((f.suggested ? f.suggested_examples : f.current_examples).slice(0, 3).join(" | "))}</td></tr>`)}</table>
+<h2>כל המאפיינים שנמצאו</h2><table><tr><th>מאפיין</th><th>מילוי</th><th>ערכים שונים</th><th>דוגמאות</th></tr>
+${rows(d.properties, (p) => `<tr><td class="m">${esc(p.name)}</td><td>${pctTxt(p.fill)}</td><td>${p.distinct}</td><td>${esc(p.examples.slice(0, 3).join(" | "))}</td></tr>`)}</table>
+</body></html>`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+  a.download = `דוח_חיבור_${d.source.name.replace(/[^\w֐-׿ -]+/g, "_")}.html`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }

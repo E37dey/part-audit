@@ -90,12 +90,25 @@ class Connector:
     def collect(self) -> Collected:
         raise NotImplementedError
 
+    def sample(self, n: int = 40) -> dict:
+        """A small read-only sample for field discovery: {"rows": [raw property dicts], "step": {checked, found},
+        "notes": [...], "api_calls": int}. No files are downloaded."""
+        raise NotImplementedError
+
     @classmethod
     def describe(cls) -> dict:
         return {"kind": cls.kind, "role": cls.role, "title": cls.title, "vendor": cls.vendor,
                 "description": cls.description, "interface": cls.interface,
                 "fields": [f.to_dict() for f in cls.fields], "verification": cls.verification,
                 "unconfirmed": cls.unconfirmed}
+
+
+def spread(items: list, n: int) -> list:
+    """n items spread over the whole list (a sample from every folder, not only the first one)."""
+    if len(items) <= n:
+        return list(items)
+    step = len(items) / n
+    return [items[int(i * step)] for i in range(n)]
 
 
 def safe_name(s: str) -> str:

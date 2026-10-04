@@ -187,6 +187,13 @@ def router(root: str) -> APIRouter:
                 results.append({"objects": [_ref(u, "ItemRevision") for u in revs], "objectUIDS": revs})
             return {".QName": _qname("Query/2008-06/SavedQuery", "ExecuteSavedQueriesResponse"),
                     "arrayOfResults": results, "ServiceData": {"plain": [], "modelObjects": {}}}
+        if op == "Core-2011-06-Session/getTypeDescriptions2":
+            names = sorted({k for o in d().objects.values() if o["cls"] == "ItemRevision" for k in o["props"]})
+            types = [{"name": t, "displayName": t, "propertyDescriptors": {
+                k: {"name": k, "displayName": k.replace("_", " ").title(), "valueType": 8} for k in names}}
+                for t in body.get("typeNames", []) if t == "ItemRevision"]
+            return {".QName": _qname("Core/2011-06/Session", "GetTypeDescriptionsResponse"), "types": types,
+                    "ServiceData": {"plain": [], "modelObjects": {}}}
         if op == "Core-2006-03-DataManagement/getProperties":
             uids = [o.get("uid") for o in body.get("objects", [])]
             attrs = body.get("attributes") or []

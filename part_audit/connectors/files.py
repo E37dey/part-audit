@@ -7,7 +7,7 @@ from pathlib import Path
 from ..model import BomLine, ErpItem, PartRecord
 from ..names import extract_part_numbers
 from ..scan import ERP_COLUMN_ALIASES, OTHER_CAD_EXTS, STEP_EXTS, iter_files
-from .base import Collected, Connector, Field, to_float
+from .base import Collected, Connector, Field, spread, to_float
 from .http import ConnectorError
 
 
@@ -38,6 +38,36 @@ class FolderSource(Connector):
             if i > 20000:
                 break
         return {"ok": True, "message": "התיקייה נגישה", "details": {"קבצי STEP": n_step, "קבצי CAD אחרים": n_other}}
+
+    def sample(self, n: int = 40) -> dict:
+        root = Path(self.cfg["path"]).resolve()
+        if not root.exists():
+            raise ConnectorError(f"התיקייה לא נמצאה: {root}")
+        steps = []
+        for i, p in enumerate(iter_files(root)):
+            if p.suffix.lower() in STEP_EXTS:
+                steps.append(p)
+            if i > 50000:
+                break
+        stems = [p.stem for p in steps]
+        rx = re.compile(self.cfg["pn_regex"]) if self.cfg.get("pn_regex") else None
+
+        def pn_of(stem: str) -> str:
+            if rx:
+                m = rx.search(stem)
+                return (m.group(1) if m and m.groups() else (m.group(0) if m else ""))
+            c = extract_part_numbers(stem)
+            return c[0] if c else ""
+        rows = [{"שם קובץ": p.name, "תיקייה": str(p.parent.relative_to(root)) if p.parent != root else "",
+                 "מק\"ט שזוהה": pn_of(p.stem)} for p in spread(steps, n)]
+        found = sum(1 for s in stems if pn_of(s))
+        notes = [f"בתיקייה {len(steps)} קבצי STEP; לכל {found} מהם זוהה מק\"ט בשם הקובץ "
+                 + ("לפי התבנית שהוגדרה" if rx else "בזיהוי האוטומטי")]
+        sug = suggest_pn_regex(stems)
+        if sug and sug["matched"] > found:
+            notes.append(f"הצעה: התבנית {sug['regex']} מזהה מק\"ט ב-{sug['matched']} מתוך {len(stems)} הקבצים")
+        return {"rows": rows, "notes": notes, "step": {"checked": len(steps), "found": len(steps)},
+                "pn_regex": sug, "pn_found": found, "files": len(steps)}
 
     def collect(self) -> Collected:
         out = Collected()
@@ -89,6 +119,10 @@ ERP_FIELDS = {
     "make_buy": ["make/buy", "type", "סוג", "ייצור/קנייה"],
     "warehouse": ["warehouse", "מחסן"],
 }
+ERP_FIELD_HE = {"part_number": "מק\"ט", "description": "תיאור", "description_en": "תיאור באנגלית", "unit": "יחידה",
+                "family": "משפחה", "status": "סטטוס", "stock": "מלאי", "unit_cost": "עלות", "currency": "מטבע",
+                "supplier": "ספק", "supplier_pn": "מק\"ט ספק", "lead_time": "זמן אספקה", "make_buy": "ייצור/קנייה",
+                "warehouse": "מחסן", "material": "חומר"}
 BOM_FIELDS = {"parent": ["parent", "assembly", "אב", "מכלול", "מק\"ט אב"], "child": ["child", "component", "בן", "רכיב",
                                                                                        "מק\"ט בן"],
               "qty": ["qty", "quantity", "כמות"]}
@@ -158,6 +192,28 @@ class ErpFile(Connector):
         return {"ok": ok, "message": "הקובץ נקרא" if ok else "לא נמצאה עמודת מק\"ט",
                 "details": {"שורות": len(first), "עמודות שזוהו": ", ".join(sorted(set(cols.values())))}}
 
+    def sample(self, n: int = 40) -> dict:
+        p = Path(self.cfg["path"])
+        if not p.exists():
+            raise ConnectorError(f"הקובץ לא נמצא: {p}")
+        sheets = read_table(p)
+        notes, rows = [], []
+        for name, df in sheets.items():
+            cols = _map_columns(df.columns, ERP_FIELDS)
+            bom = _map_columns(df.columns, BOM_FIELDS)
+            if "part_number" in cols.values() and not rows:
+                rows = [{str(k): str(v) for k, v in r.items()} for r in df.head(n).to_dict("records")]
+                found = ", ".join(f"{c} = {ERP_FIELD_HE.get(v, v)}" for c, v in cols.items())
+                notes.append(f"גיליון '{name}': {len(df)} שורות. עמודות שזוהו: {found}")
+                missing = [ERP_FIELD_HE[k] for k in ("description", "stock", "unit_cost") if k not in cols.values()]
+                if missing:
+                    notes.append("לא זוהו עמודות: " + ", ".join(missing) + " – אפשר לשנות את כותרת העמודה בקובץ")
+            elif {"parent", "child"} <= set(bom.values()):
+                notes.append(f"גיליון '{name}': עץ מוצר, {len(df)} שורות")
+        if not rows:
+            raise ConnectorError("לא נמצא גיליון עם עמודת מק\"ט")
+        return {"rows": rows, "notes": notes}
+
     def collect(self) -> Collected:
         out = Collected()
         p = Path(self.cfg["path"])
@@ -204,6 +260,25 @@ class ErpFile(Connector):
                                            to_float(row.get("qty")) or 1.0))
         out.stats = {"items": len(out.erp_items), "bom_lines": len(out.bom)}
         return out
+
+
+# common ways part numbers are written in file names, tried in this order
+_PN_PATTERNS = [r"(\d{3}-\d{4,5}(?:-\d{1,3})?)", r"([A-Z]{1,4}-\d{3,6}(?:-\d{1,3})?)", r"([A-Z]{1,4}-[A-Z]{2,4}-\d{3,6})",
+                r"([A-Z]{2,4}\d{4,8})", r"(\d{6,10})", r"(\d{2,4}\.\d{3,5}(?:\.\d{1,3})?)"]
+
+
+def suggest_pn_regex(stems: list[str]) -> dict | None:
+    """The file-name pattern that finds a part number in most files (None when nothing fits half of them)."""
+    if not stems:
+        return None
+    best = None
+    for rx in _PN_PATTERNS:
+        rx = ("(?i)" + rx) if "A-Z" in rx else rx
+        c = re.compile(rx)
+        n = sum(1 for s in stems if c.search(s))
+        if best is None or n > best["matched"]:
+            best = {"regex": rx, "matched": n, "of": len(stems)}
+    return best if best and best["matched"] >= 0.5 * len(stems) else None
 
 
 def _mb(v) -> str:

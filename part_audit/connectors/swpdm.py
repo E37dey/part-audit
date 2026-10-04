@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..model import PartRecord, classify_state
-from .base import CAD_ASM_EXT, CAD_PART_EXT, STEP_EXT, Collected, Connector, Field, mass_to_kg, stem_key
+from .base import CAD_ASM_EXT, CAD_PART_EXT, STEP_EXT, Collected, Connector, Field, mass_to_kg, spread, stem_key
 from .http import ConnectorError, ReadOnlyHttp
 
 _VAR_FIELDS = [
@@ -110,6 +110,22 @@ class SwPdmWeb(Connector):
             for m in c.get("Models", []):
                 vals.setdefault(m.get("VarName"), m.get("VarValue"))
         return vals
+
+    def sample(self, n: int = 40) -> dict:
+        h = self._http()
+        try:
+            self._login(h)
+            files = self._list(h)
+            native = [o for o in files if o["Name"].lower().endswith(CAD_PART_EXT + CAD_ASM_EXT)]
+            steps = {stem_key(o["Name"]) for o in files if o["Name"].lower().endswith(STEP_EXT)}
+            pick = spread(native, n)
+            rows = [{k: v for k, v in self._vars(h, o).items() if k} for o in pick]
+            parts = [o for o in pick if o["Name"].lower().endswith(CAD_PART_EXT)]
+            return {"rows": rows, "api_calls": h.calls,
+                    "step": {"checked": len(parts), "found": sum(1 for o in parts if stem_key(o["Name"]) in steps)},
+                    "notes": [f"בכספת {len(native)} קבצי CAD; נדגמו {len(pick)} מכל התיקיות"]}
+        finally:
+            h.close()
 
     def collect(self) -> Collected:
         out = Collected()
