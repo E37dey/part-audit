@@ -27,7 +27,7 @@
 
 ## איך מתחילים
 
-1. **סביבת ההדגמה**: לוחצים "טען סביבת הדגמה" ואחר כך "סריקה חדשה". זו קבוצת תעשייה בדויה עם 4 אתרים ו-4 מערכות PDM/PLM שונות, ארכיון קבצים ישן ו-Priority. הסריקה הראשונה לוקחת פחות מדקה.
+1. **סביבת ההדגמה**: לוחצים "טען סביבת הדגמה" ואחר כך "סריקה חדשה". זו קבוצת תעשייה בדויה עם 4 אתרים ו-4 מערכות PDM/PLM שונות, ארכיון קבצים ישן ו-Priority. הסריקה הראשונה לוקחת בערך דקה.
 2. **המערכות שלכם**: במסך "מקורות נתונים" לוחצים "הוסף מקור", בוחרים מערכת, ממלאים כתובת ומשתמש (מומלץ משתמש עם הרשאת קריאה בלבד) ולוחצים "בדוק חיבור". בתוך האפליקציה יש מדריך עם מה שכל מערכת צריכה.
 
 | מערכת | ממשק |
@@ -87,7 +87,7 @@ docs/research/  public API documentation that the connectors follow (with source
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements-dev.txt
 .venv/bin/python -m part_audit app            # http://127.0.0.1:8765, opens the browser
-.venv/bin/python -m pytest                    # 90 tests
+.venv/bin/python -m pytest                    # 108 tests
 ```
 
 `python -m part_audit app --port 8765 --workspace ~/PartAudit --no-demo --no-browser` are the options.
@@ -105,10 +105,10 @@ calls it needs (logins, POST searches, SOA read operations, logouts). Any other 
 before it leaves the machine. The check also runs on every redirect httpx follows, so a 307 cannot turn an allowed
 login into another call (`tests/test_connectors.py`).
 
-The app binds to a loopback address only (other `--host` values are refused). It answers only when the Host header
-is a loopback name, which blocks DNS rebinding. Requests that change something are refused when they come from
-another site's page (Origin) or are not JSON (`tests/test_app.py`). Calls to a server on this computer bypass any
-configured proxy.
+The app binds to a loopback address only (any other `--host` value is replaced with 127.0.0.1). It answers only
+when the Host header is a loopback name, which blocks DNS rebinding. A request that changes something must be
+addressed to the app's own port, and is refused when another site's page sent it (Origin, Sec-Fetch-Site) or when
+it is not JSON (`tests/test_app.py`). Calls to a server on this computer bypass any configured proxy.
 
 Credentials (password fields, the Priority token) are kept in the OS credential store when one exists (Windows
 Credential Manager, macOS Keychain). Otherwise they stay in the local SQLite database. The API never returns them,
@@ -158,7 +158,7 @@ from the simulators, then audited. Numbers from `results/demo_factory_eval.json`
 | same shape, different spec (hard negatives) | 18 of 18 not merged (15 flagged as spec conflict) |
 | near-identical, mirror and old-revision variants | none merged |
 | planted data-quality and ERP issues | 81 planted in 14 kinds, 71 within what the checks look at: 70 found (one stale mass missed). Not checked: 7 missing materials on purchased parts (by design), 1 mass without a STEP file, 2 empty descriptions that the SOLIDWORKS PDM and Vault simulators fill with the name |
-| time | 4.5 s reading 6 sources + 41.9 s audit (472 parts, 2 workers, cold cache) |
+| time | 4.5 s reading 6 sources + 40.3 s audit (472 parts, 2 workers, cold cache) |
 
 The v1 measurements (held-out ABC test set, NIST files, 5000-file benchmark) are in [RESULTS.md](RESULTS.md),
 including a re-run of the v1 test set with the v2 engine. The v1 command-line tool is documented in

@@ -13,7 +13,7 @@ export async function render({ el, setTitle, state }) {
     ${kpi("חלקים שנסרקו", n0(s.parts), `${n0(s.assemblies)} מכלולים · ${n0(s.sources)} מקורות · ${n0(s.with_step)} עם STEP`, "#/parts")}
     ${kpi("קבוצות כפילות", n0(s.groups), `${n0(s.parts_in_groups)} רשומות · ${n0(s.groups_cross_source)} חוצות מערכות`, "#/groups", true)}
     ${kpi("מק\"טים שאפשר לבטל", n0(s.redundant_pns), "אחרי אישור – אחד בכל קבוצה נשאר", "#/mapping", true)}
-    ${kpi("מלאי במק\"טים הכפולים", money(s.redundant_stock_value, cur), "כמות × עלות מה-ERP, בלי המק\"ט המוצע", "#/groups")}
+    ${kpi("מלאי במק\"טים הכפולים", money(s.redundant_stock_value, cur), "כמות × עלות מה-ERP, בלי המק\"ט שנשאר", "#/groups")}
     ${kpi("כמעט זהים", n0(s.near_pairs), "זוגות שאפשר אולי לתקנן לחלק אחד", "#/near")}
     ${kpi("ממתינים לאישור", n0(d.decisions.pending_groups), `${n0(d.decisions.approved_groups)} קבוצות כבר אושרו`, "#/mapping")}
     ${kpi("בעיות איכות", n0(s.quality_high + s.quality_medium), `${n0(s.quality_high)} בחומרה גבוהה`, "#/quality")}
