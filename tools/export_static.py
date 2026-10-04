@@ -196,6 +196,16 @@ def main() -> None:
     dump(data / "part_details.json", {p["uid"]: get(f"/api/runs/latest/parts/{p['uid']}") for p in parts})
     dump(data / "variety.json", get("/api/runs/latest/variety"))
     dump(data / "trends.json", get("/api/trends"))
+    # configuration control: every product and its tree; the "part numbers 101" examples
+    products = get("/api/runs/latest/products")
+    dump(data / "products.json", products)
+    dump(data / "product_trees.json", {p["uid"]: get(f"/api/runs/latest/products/{p['uid']}") for p in products["products"]})
+    dump(data / "learn.json", get("/api/learn"))
+    # change package: the data per group and possible target; the online copy puts the package together from the
+    # decisions made in the browser (api.js, the same rules as package.py)
+    from part_audit.package import package_data
+    rid = get("/api/status")["latest_run"]
+    dump(data / "package_data.json", package_data(json.loads((Path(args.workspace) / "runs" / rid / "result.json").read_text(encoding="utf-8"))))
     # shape search: the ten closest shapes of every part with a model
     dump(data / "similar.json", {p["uid"]: get(f"/api/runs/latest/similar/{p['uid']}", k=10)
                                  for p in parts if p["has_step"] and p["kind"] == "part"})

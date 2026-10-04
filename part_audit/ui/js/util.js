@@ -58,7 +58,7 @@ export const GROUP_CAT = { standard: ["חלק תקני – אותו מפרט", "
 export function groupPill(c) { const [he, tone] = GROUP_CAT[c] || [c, "neutral"]; return `<span class="pill ${tone}">${esc(he)}</span>`; }
 export function catPill(c) { const [he, tone] = CATEGORY[c] || [c, "neutral"]; return `<span class="pill ${tone}">${esc(he)}</span>`; }
 export function pnChip(pn, master = false) {
-  return pn ? `<span class="chip pn${master ? " master" : ""}" title="${master ? "מק\"ט מוצע" : ""}">${esc(pn)}</span>` : `<span class="muted">ללא מק"ט</span>`;
+  return pn ? `<span class="chip pn${master ? " master" : ""}"${master ? ' title="המק&quot;ט שנשאר"' : ""}>${esc(pn)}</span>` : `<span class="muted">ללא מק"ט</span>`;
 }
 export const rev = (r) => (r && r !== "-" ? `<span class="rev" title="רוויזיה">${esc(r)}</span>` : "");
 export const cm3 = (v) => (v == null ? "—" : (v / 1000 < 10 ? (v / 1000).toFixed(2) : nf1.format(v / 1000)) + " סמ\"ק");
@@ -76,6 +76,13 @@ export function qsa(sel, root = document) { return [...root.querySelectorAll(sel
 export function debounce(fn, ms = 200) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 export const ICON = {
+  anchor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M8 10h8M4 13a8 8 0 0 0 16 0"/></svg>',
+  learn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-4.2 10.3c.8.8 1.2 1.6 1.2 2.7h6c0-1.1.4-1.9 1.2-2.7A6 6 0 0 0 12 3z"/></svg>',
+  tree: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg>',
+  eco: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11l2 2 4-4M9 17h6"/></svg>',
+  part: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>',
+  asm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 4l5 2.8v5.6L7 15.2 2 12.4V6.8z"/><path d="M17 8.8l5 2.8v5.6L17 20l-5-2.8v-5.6z"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 7h6v10H4z"/><path d="M10 9.5h10v5H10M13 9.5l1.5 5M16 9.5l1.5 5"/></svg>',
   dash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',
   plug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',

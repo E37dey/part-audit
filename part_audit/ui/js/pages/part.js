@@ -1,6 +1,7 @@
 // Everything known about one record: model, attributes, ERP, where it is used, history and findings.
 import { get, binary } from "../api.js";
-import { esc, n0, kg, money, date, sysBadge, statePill, pnChip, rev, mb, cm3, dims, catPill, sevPill, uidLink, confBar, shapeRows } from "../util.js";
+import { esc, n0, kg, money, date, sysBadge, statePill, pnChip, rev, mb, cm3, dims, catPill, sevPill, uidLink, confBar, shapeRows, ICON } from "../util.js";
+import { term } from "../learn.js";
 import { Viewer } from "../viewer3d.js";
 import { modal } from "../ui.js";
 import { compare3d } from "../compare3d.js";
@@ -37,21 +38,22 @@ export async function render({ el, param, setTitle }) {
     </section>
 
     <section class="grid grid-2">
-      <div class="panel"><div class="panel-h"><h2>ERP</h2>${e ? `<span class="sub">${pnChip(e.pn)}</span>` : ""}</div>
+      <div class="panel"><div class="panel-h"><h2>${term("erp", "ERP")}</h2>${e ? `<span class="sub">${pnChip(e.pn)}</span>` : ""}</div>
         <div class="panel-b">${e ? `<dl class="kv">${kv("תיאור", esc(e.description))}${kv("מלאי", `${n0(e.stock)} ${esc(e.uom || "")}`)}
           ${kv("עלות יחידה", money(e.unit_cost, e.currency || "ILS"))}${kv("שווי מלאי", e.unit_cost != null ? money(e.stock * e.unit_cost, e.currency || "ILS") : "")}
           ${kv("סטטוס", esc(e.status))}${kv("ספק", esc(e.supplier))}${kv("משפחה", esc(e.family))}</dl>`
           : '<div class="empty">לא נמצא פריט ERP עם המק"ט הזה</div>'}</div></div>
-      <div class="panel"><div class="panel-h"><h2>איפה בשימוש</h2><span class="sub">${n0(p.parents.length + p.erp_parents.length)} שורות בעצי מוצר</span></div>
+      <div class="panel"><div class="panel-h"><h2>${term("whereused", "איפה בשימוש")}</h2><span class="sub">${n0(p.parents.length + p.erp_parents.length)} שורות בעצי מוצר</span></div>
         <div class="table-wrap" style="max-height:320px"><table class="t"><thead><tr><th>מכלול</th><th>מערכת</th><th class="n">כמות</th></tr></thead><tbody>
           ${p.parents.map((x) => `<tr><td>${uidLink(x.uid, pnChip(x.pn))} <span class="small">${esc(x.name)}</span></td><td class="small">${esc(x.source)}</td><td class="n">${n0(x.qty)}</td></tr>`).join("")}
           ${p.erp_parents.map((x) => `<tr><td>${pnChip(x.parent)}</td><td>${sysBadge("ERP", "עץ מוצר ב-ERP")}</td><td class="n">${n0(x.qty)}</td></tr>`).join("")}
           ${p.parents.length + p.erp_parents.length ? "" : '<tr><td colspan="3" class="muted">לא נמצא בשימוש באף מכלול</td></tr>'}
         </tbody></table></div>
-        ${p.products?.length ? `<div class="panel-b small"><b>מוצרים:</b> ${p.products.map((x) => uidLink(x.uid, `<span class="chip">${esc(x.pn || x.name)}</span>`)).join(" ")}</div>` : ""}</div>
+        ${p.products?.length ? `<div class="panel-b small"><b>מוצרים:</b> ${p.products.map((x) => uidLink(x.uid, `<span class="chip">${esc(x.pn || x.name)}</span>`)).join(" ")}
+          <div style="margin-top:6px">${p.products.map((x) => `<a href="#/config/${encodeURIComponent(x.uid)}?item=${encodeURIComponent(p.uid)}"><span class="ic">${ICON.tree}</span> לראות את החלק בעץ של ${esc(x.name)}</a>`).join("<br>")}</div></div>` : ""}</div>
     </section>
 
-    ${p.children?.length ? `<section class="panel"><div class="panel-h"><h2>רכיבים</h2><span class="sub">${n0(p.children.length)} שורות</span></div>
+    ${p.children?.length ? `<section class="panel"><div class="panel-h"><h2>${term("bom", "רכיבים")}</h2><span class="sub">${n0(p.children.length)} שורות</span></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>מק"ט</th><th>שם</th><th>מצב</th><th class="n">כמות</th></tr></thead><tbody>
       ${p.children.map((c) => `<tr><td>${uidLink(c.uid, pnChip(c.pn))}</td><td>${esc(c.name)}${c.kind === "assembly" ? ' <span class="pill neutral plain">מכלול</span>' : ""}</td>
         <td>${statePill(c.state_class, c.state)}</td><td class="n">${n0(c.qty)}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
@@ -70,7 +72,7 @@ export async function render({ el, param, setTitle }) {
       ${p.issues.map((q) => `<tr><td>${sevPill(q.severity)}</td><td class="small">${esc(q.type_he)}</td><td>${esc(q.message)}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
 
     <section class="grid grid-2">
-      <div class="panel"><div class="panel-h"><h2>היסטוריית גרסאות</h2></div>
+      <div class="panel"><div class="panel-h"><h2>היסטוריית ${term("revision", "גרסאות")}</h2></div>
         ${p.history?.length ? `<div class="table-wrap"><table class="t"><thead><tr><th>גרסה</th><th>רוויזיה</th><th>תאריך</th><th>הערה</th></tr></thead><tbody>
           ${p.history.map((h) => `<tr><td class="num">${esc(h.version ?? "")}</td><td>${rev(h.revision)}</td><td>${date(h.date)}</td><td>${esc(h.comment || "")}</td></tr>`).join("")}</tbody></table></div>`
           : '<div class="panel-b muted small">המערכת לא החזירה היסטוריית גרסאות לרשומה הזו.</div>'}</div>

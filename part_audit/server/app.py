@@ -1008,6 +1008,57 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 "issues": issues, "history": hist, "props": props,
                 "products": [{"uid": t, "pn": idx[t]["pn"], "name": idx[t]["name"]} for t in tops if t in idx]}
 
+    # ------------------------------------------------------------------ configuration control and learning
+    @app.get("/api/runs/{rid}/products")
+    def products_list(rid: str):
+        """Every top-level product with how many of its items need attention (config.py)."""
+        from ..config import product_list
+        rid, res = load_result(rid)
+        return {"products": product_list(res, store.current_decisions())}
+
+    @app.get("/api/runs/{rid}/products/{uid:path}")
+    def product_tree_of(rid: str, uid: str):
+        from ..config import product_tree
+        rid, res = load_result(rid)
+        out = product_tree(res, uid, store.current_decisions())
+        if out is None:
+            raise HTTPException(404, "המוצר לא נמצא")
+        return out
+
+    @app.get("/api/runs/{rid}/package")
+    def change_package(rid: str):
+        """What to change in each system to carry out the approved decisions (package.py). Read-only."""
+        from ..package import build_package
+        rid, res = load_result(rid)
+        run = next((r for r in store.list_runs() if r["id"] == rid), {})
+        return {"run_id": rid, "created": run.get("created"), "demo": bool(res.get("demo")),
+                **build_package(res, store.current_decisions())}
+
+    @app.get("/api/runs/{rid}/package.{fmt}")
+    def change_package_file(rid: str, fmt: str, request: Request):
+        from ..package import build_package, package_csv, write_package_xlsx
+        if fmt not in ("xlsx", "csv"):
+            raise HTTPException(404, "סוג קובץ לא מוכר")
+        rid, res = load_result(rid)
+        pkg = build_package(res, store.current_decisions())
+        if fmt == "csv":
+            return Response(package_csv(pkg), media_type="text/csv; charset=utf-8",
+                            headers={"Content-Disposition": "attachment; filename*=UTF-8''" + "%D7%97%D7%91%D7%99%D7%9C%D7%AA_%D7%A9%D7%99%D7%A0%D7%95%D7%99.csv"})
+        run = next((r for r in store.list_runs() if r["id"] == rid), {})
+        out = write_package_xlsx(pkg, store.ws / "exports" / f"change_package_{rid}.xlsx", run=rid, created=run.get("created") or "",
+                                 user=actor(request), demo=bool(res.get("demo")))
+        return FileResponse(out, filename=f"חבילת_שינוי_{rid}.xlsx",
+                            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    @app.get("/api/learn")
+    def learn():
+        """Real examples from the latest scan for the "part numbers 101" screen."""
+        from ..config import learn_examples
+        if not store.latest_run():
+            return {"available": False}
+        _, res = load_result("latest")
+        return learn_examples(res, store.current_decisions())
+
     variety_cache: dict[str, dict] = {}
 
     @app.get("/api/runs/{rid}/variety")

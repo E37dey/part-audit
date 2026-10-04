@@ -65,6 +65,11 @@ function chosenTarget(g, d) {
 function impactFor(g, t) {
   return groupImpact(g, t.pn, t.erp ? t.erp.pn : null);
 }
+/** What merging a group into one of its records would change (decisions.group_impact), for a choice not saved yet. */
+export function impactOf(g, uid) {
+  const t = g.parts.find((x) => x.uid === uid);
+  return t ? { ...impactFor(g, t), redundant_pns: Math.max(0, new Set(g.pns.map(pnKey)).size - 1) } : null;
+}
 
 async function applyDecisions(rows, kind) {
   if (!STATIC || !Array.isArray(rows)) return rows;
@@ -111,6 +116,82 @@ async function effectiveMapping(rows) {
   return rows.filter((r) => !overridden.has(r.group_id)).concat(extra);
 }
 
+// change package in the online copy: the rules of package.py (approved / combine), on the data that was exported
+// per group and per possible target, and the decisions made in this tab
+const KIND_ORDER = { replace_line: 0, supersede: 1, move_stock: 2 };
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+function afterOf(lines, rs) {
+  const swap = new Map(rs.map((x) => [pnKey(x.old), x]));
+  const out = new Map(), marks = new Map();
+  for (const ln of lines) {
+    const x = swap.get(pnKey(ln.pn));
+    const [pn, name] = x ? [x.new, x.new_name] : [ln.pn, ln.name];
+    const k = pnKey(pn);
+    if (out.has(k)) { out.get(k).qty += ln.qty; marks.set(k, "merged"); }
+    else { out.set(k, { pn, name, qty: ln.qty, was: x ? ln.pn : null }); marks.set(k, x ? "replaced" : "same"); }
+  }
+  const after = [...out].map(([k, v]) => ({ ...v, change: marks.get(k) }));
+  return { after, changes: after.filter((v) => v.change !== "same").length };
+}
+function combinePackage(data, chosen) {
+  const actions = [], groups = [], repl = new Map();
+  for (const [gid, target, olds] of chosen) {
+    const g = data.groups[gid], tg = g && g.targets[target];
+    if (!tg) continue;
+    const keys = new Set(olds.map(pnKey));
+    const rows = tg.rows.filter((r) => keys.has(pnKey(r.old_pn)));
+    groups.push({ id: gid, name: g.name, spec: g.spec, target_pn: tg.target_pn, target_name: tg.target_name, old_pns: rows.map((r) => r.old_pn) });
+    for (const r of rows) {
+      r.actions.forEach((a) => actions.push({ ...a, group_id: gid }));
+      r.replace.forEach((x) => { if (!repl.has(x.assembly)) repl.set(x.assembly, []); repl.get(x.assembly).push(x); });
+    }
+  }
+  const assemblies = [...repl].map(([key, rs]) => {
+    const a = data.assemblies[key];
+    return { key, system: a.system, system_kind: a.system_kind, kind: a.kind, pn: a.pn, name: a.name, uid: a.uid, state: a.state, before: a.lines, ...afterOf(a.lines, rs) };
+  }).sort((a, b) => cmp(a.kind === "erp", b.kind === "erp") || cmp(a.system, b.system) || cmp(a.pn || "", b.pn || ""));
+  const seen = new Set(), uniq = [];
+  for (const a of actions) {
+    const k = [a.kind, a.system, a.assembly || "", a.kind !== "replace_line" ? a.pn : a.old_pn, a.new_pn || a.to_pn].join("|");
+    if (!seen.has(k)) { seen.add(k); uniq.push(a); }
+  }
+  const systems = new Map();
+  for (const a of uniq) {
+    if (!systems.has(a.system)) systems.set(a.system, { name: a.system, kind: a.system_kind || "", actions: [] });
+    systems.get(a.system).actions.push(a);
+  }
+  for (const s of systems.values()) {
+    s.actions.sort((a, b) => cmp(KIND_ORDER[a.kind], KIND_ORDER[b.kind]) || cmp(a.assembly_pn || "", b.assembly_pn || "")
+      || cmp(a.pn || a.old_pn || "", b.pn || b.old_pn || ""));
+    s.counts = Object.fromEntries(Object.keys(KIND_ORDER).map((k) => [k, s.actions.filter((a) => a.kind === k).length]));
+  }
+  const moved = uniq.filter((a) => a.kind === "move_stock");
+  const curs = moved.map((a) => a.currency).filter(Boolean);
+  const cur = curs.length ? [...new Set(curs)].sort((a, b) => curs.filter((x) => x === b).length - curs.filter((x) => x === a).length
+    || cmp(a !== data.currency, b !== data.currency) || cmp(a, b))[0] : data.currency;
+  return { groups, systems: [...systems.values()].sort((a, b) => cmp(a.kind === "ERP", b.kind === "ERP") || cmp(a.name, b.name)), assemblies,
+    totals: { groups: groups.length, old_pns: groups.reduce((t, g) => t + g.old_pns.length, 0),
+      bom_lines: uniq.filter((a) => a.kind === "replace_line").length, assemblies: assemblies.length,
+      supersede: uniq.filter((a) => a.kind === "supersede").length, stock_items: moved.length, currency: cur,
+      stock_value: Math.round(moved.filter((a) => (a.currency || cur) === cur).reduce((t, a) => t + (a.value || 0), 0) * 100) / 100,
+      systems: systems.size } };
+}
+async function staticPackage() {
+  const [data, details] = await Promise.all([staticJson("package_data.json"), staticJson("group_details.json")]);
+  const chosen = new Map();
+  for (const r of await effectiveMapping(await staticJson("mapping.json"))) {
+    const own = latestDecision("mapping", r.id), grp = latestDecision("group", r.group_id);
+    const pick = grp && (!own || grp.seq > own.seq) ? grp : own;
+    const g = details[r.group_id];
+    if (!pick || pick.decision !== "approve" || !g) continue;
+    const t = chosenTarget(g, grp);
+    if (!t || pnKey(t.pn) !== pnKey(r.new_pn)) continue;
+    if (!chosen.has(g.id)) chosen.set(g.id, [t.uid, []]);
+    chosen.get(g.id)[1].push(r.old_pn);
+  }
+  return combinePackage(data, [...chosen].map(([gid, [t, olds]]) => [gid, t, olds]));
+}
+
 async function staticGet(path, params = {}) {
   const p = path.replace(/^\/api\//, "");
   let m;
@@ -120,6 +201,14 @@ async function staticGet(path, params = {}) {
   if (p === "settings") return (await staticJson("status.json")).settings;
   if (p === "runs") return staticJson("runs.json");
   if (p === "trends") return staticJson("trends.json");
+  if (p === "learn") return staticJson("learn.json");
+  if ((m = p.match(/^runs\/[^/]+\/products$/))) return staticJson("products.json");
+  if ((m = p.match(/^runs\/[^/]+\/products\/(.+)$/))) {
+    const x = (await staticJson("product_trees.json"))[decodeURIComponent(m[1])];
+    if (!x) throw new Error("המוצר לא נמצא");
+    return x;
+  }
+  if ((m = p.match(/^runs\/[^/]+\/package$/))) return { ...(await staticPackage()), demo: true };
   if (p === "users") return { users: [], roles: {}, team: false, admins: 0 };
   if (p === "decisions") return [...memDecisions].reverse();
   if ((m = p.match(/^sources\/([^/]+)\/discovery$/))) {
@@ -323,3 +412,5 @@ export async function upload(file) {
   if (!r.ok) throw await failure(r, "ההעלאה נכשלה");
   return r.json();
 }
+// for the test that the online copy and package.py put the same change package together
+export { combinePackage as _combinePackage };

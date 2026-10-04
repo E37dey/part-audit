@@ -2,6 +2,7 @@
 import { get, send, isStatic, session, can, loadSession } from "./api.js";
 import { esc, ICON, LOGO, n0, datetime, pnChip, sysBadge, debounce } from "./util.js";
 import { modal, toast } from "./ui.js";
+import { initLearning, learnCard, learning, setLearning } from "./learn.js";
 
 const PAGES = {
   dashboard: () => import("./pages/dashboard.js"), welcome: () => import("./pages/welcome.js"),
@@ -11,18 +12,20 @@ const PAGES = {
   parts: () => import("./pages/parts.js"), part: () => import("./pages/part.js"), settings: () => import("./pages/settings.js"),
   guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"), changes: () => import("./pages/changes.js"),
   report: () => import("./pages/report.js"), variety: () => import("./pages/variety.js"),
-  trends: () => import("./pages/trends.js"),
+  trends: () => import("./pages/trends.js"), learn: () => import("./pages/learn.js"), config: () => import("./pages/config.js"),
+  package: () => import("./pages/package.js"),
 };
 // the navigation follows the work: connect the systems, go through the findings, decide
 const NAV = [
-  [null, [["dashboard", "לוח בקרה", ICON.dash], ["changes", "מה השתנה", ICON.delta, "changes"], ["trends", "מגמות", ICON.trend]]],
+  [null, [["learn", "מק\"ט – מאיפה מתחילים", ICON.learn], ["dashboard", "לוח בקרה", ICON.dash], ["changes", "מה השתנה", ICON.delta, "changes"],
+    ["trends", "מגמות", ICON.trend]]],
   ["1", "חיבור", [["sources", "מקורות נתונים", ICON.plug]]],
   ["2", "ממצאים", [["groups", "כפילויות", ICON.copy, "groups"], ["near", "כמעט זהים", ICON.near, "near_pairs"],
     ["names", "שמות ומק\"טים", ICON.tag, "name_findings"], ["quality", "איכות נתונים", ICON.check, "quality_issues"],
     ["erp", "ERP מול PDM", ICON.erp, "erp_issues"]]],
-  ["3", "החלטה", [["mapping", "מיפוי ואישורים", ICON.map, "pending"]]],
-  ["", "כלים", [["check", "בדיקת חלק חדש", ICON.inspect], ["parts", "חיפוש חלקים", ICON.search], ["variety", "צמצום מגוון", ICON.variety],
-    ["report", "דוח להנהלה", ICON.report]]],
+  ["3", "החלטה", [["mapping", "מיפוי ואישורים", ICON.map, "pending"], ["package", "חבילת שינוי", ICON.eco]]],
+  ["", "כלים", [["config", "בקרת תצורה", ICON.tree], ["check", "בדיקת חלק חדש", ICON.inspect], ["parts", "חיפוש חלקים", ICON.search],
+    ["variety", "צמצום מגוון", ICON.variety], ["report", "דוח להנהלה", ICON.report]]],
 ];
 export const state = { status: null, summary: null };
 let cleanup = null;
@@ -52,6 +55,8 @@ function shell() {
         <a href="#/guide" data-k="guide">${ICON.book}<span>מדריך</span></a></nav>
       <div class="rail-foot">
         ${session.team && session.user ? userChip(session.user) : ""}
+        <button class="learn-switch" id="learn-switch" type="button" aria-pressed="${learning()}" title="הסברים קצרים בכל מסך, ומונחים שמסבירים את עצמם">
+          <i aria-hidden="true"></i><span>מצב למידה</span></button>
         <button class="theme-switch" id="theme" type="button">${themeButton()}</button>
         <div class="lock">${ICON.lock}<span>קריאה בלבד: התוכנה לא כותבת ל-PDM, ל-PLM או ל-ERP. ${session.team ? "הכול רץ בשרת של הצוות." : "הכול רץ במחשב הזה."}</span></div>
         <div id="ver"></div></div>
@@ -66,6 +71,14 @@ function shell() {
       <div class="content" id="content"></div>
     </div></div>`;
   document.getElementById("theme").onclick = () => setTheme(theme() === "dark" ? "light" : "dark");
+  const ls = document.getElementById("learn-switch");
+  ls.onclick = () => {
+    const on = !learning();
+    setLearning(on);
+    ls.setAttribute("aria-pressed", String(on));
+    toast(on ? "מצב למידה פועל: בכל מסך יש הסבר קצר, ומונחים עם קו מנוקד מסבירים את עצמם" : "מצב למידה כבוי");
+    route();
+  };
   globalSearch();
   const scanBtn = document.getElementById("btn-scan");
   if (scanBtn) scanBtn.onclick = startScan;
@@ -79,7 +92,7 @@ function shell() {
     if (!state.status?.latest_run) { toast("אין עדיין תוצאות לייצוא", true); return; }
     location.href = `/api/runs/${state.status.latest_run}/export.xlsx`;
   };
-  if (isStatic) document.getElementById("btn-scan").title = "בגרסה המקוונת מוצגות תוצאות של סריקה שבוצעה; סריקה חדשה רצה באפליקציה המקומית";
+  if (isStatic && scanBtn) scanBtn.title = "בגרסה המקוונת מוצגות תוצאות של סריקה שבוצעה; סריקה חדשה רצה באפליקציה המקומית";
 }
 
 // the signed-in user (team server): name, role, password change and sign-out
@@ -186,6 +199,7 @@ export function setTitle(title, crumbs = "") {
 }
 
 export function go(hash) { location.hash = hash; }
+const NEEDS_SCAN = new Set(["config", "package"]);
 
 async function route() {
   const raw = decodeURIComponent((location.hash || "#/").slice(2)).split("?")[0];   // ?… are a page's own options
@@ -193,6 +207,8 @@ async function route() {
   const param = rest.join("/");
   if (!page) page = state.summary ? "dashboard" : (state.status?.sources ? "sources" : "welcome");
   if (page === "dashboard" && !state.summary) page = state.status?.sources ? "sources" : "welcome";
+  // screens that need a scan open the start screen until there is one
+  if (!state.summary && NEEDS_SCAN.has(page)) page = state.status?.sources ? "sources" : "welcome";
   document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.k === page || (page === "group" && a.dataset.k === "groups")
     || (page === "pair" && a.dataset.k === "near") || (page === "part" && a.dataset.k === "parts")));
   const content = document.getElementById("content");
@@ -210,6 +226,7 @@ async function route() {
       b.innerHTML = `<summary><b>סביבת הדגמה</b><span>הנתונים סינתטיים, והמערכות הן סימולטורים מקומיים</span><span class="more">פרטים</span></summary><p>${DEMO_NOTE}</p>`;
       content.appendChild(b);
     }
+    content.insertAdjacentHTML("beforeend", learnCard(page));
     const box = document.createElement("div");
     box.className = "page";
     content.appendChild(box);
@@ -272,6 +289,7 @@ async function main() {
   try { await loadSession(); } catch { /* the status call below reports a server that does not answer */ }
   if (session.team && !session.user) { signIn(); return; }
   document.body.dataset.role = session.team && session.user ? session.user.role : "admin";
+  initLearning();
   shell();
   try { await refreshStatus(); } catch (e) { document.getElementById("content").innerHTML = `<div class="empty">לא ניתן להתחבר לשרת: ${esc(e.message)}</div>`; return; }
   window.addEventListener("pa-login", () => signIn(true), { once: true });

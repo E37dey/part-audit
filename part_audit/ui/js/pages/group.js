@@ -1,11 +1,51 @@
 // One duplicate group: the parts side by side in 3D, their attributes, the impact of merging, the evidence and the decision.
-import { get } from "../api.js";
+import { get, send, can, impactOf } from "../api.js";
 import { esc, n0, money, datetime, sysBadge, pnChip, groupPill, catPill, confBar, uidLink, DECISION, ICON } from "../util.js";
-import { decisionBar } from "../ui.js";
+import { decisionBar, toast } from "../ui.js";
+import { term } from "../learn.js";
 import { Viewer, linkViewers } from "../viewer3d.js";
 import { attrTable } from "../compare.js";
 
 const MAX_VIEWERS = 6;
+const tag = (pn, cls = "") => `<span class="ptag ${cls}"><i aria-hidden="true"></i><span>${esc(pn)}</span></span>`;
+
+// one tag per part number (records that share a number share a tag), around the part in the middle
+function numbers(parts, g) {
+  const by = new Map();
+  for (const p of parts) {
+    if (!p.pn) continue;
+    const k = p.pn;
+    if (!by.has(k)) by.set(k, { pn: p.pn, records: [] });
+    by.get(k).records.push(p);
+  }
+  const out = [...by.values()];
+  // the record a part number stands for when it is chosen: the proposed one, else one linked to the ERP
+  out.forEach((n) => (n.uid = (n.records.find((r) => r.uid === g.master_uid) || n.records.find((r) => r.erp) || n.records[0]).uid));
+  return out;
+}
+
+function diagram(nums, targetPn, H = 86) {
+  const pos = nums.map((_, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / nums.length; return [50 + 33 * Math.cos(a), (50 + 37 * Math.sin(a)) * H / 100]; });
+  const t = nums.findIndex((n) => n.pn === targetPn);
+  const lines = nums.map((n, i) => {
+    if (i === t || t < 0) return "";
+    const [x1, y1] = pos[i], [x2, y2] = pos[t], cx = 50, cy = H / 2;
+    // from just outside one tag to just outside the target, bending through the part in the middle
+    const shrink = (ax, ay, bx, by, d) => { const L = Math.hypot(bx - ax, by - ay) || 1; return [ax + ((bx - ax) * d) / L, ay + ((by - ay) * d) / L]; };
+    const [sx, sy] = shrink(x1, y1, cx, cy, 8), [ex, ey] = shrink(x2, y2, cx, cy, 9);
+    return `<path d="M${sx.toFixed(1)} ${sy.toFixed(1)} Q${cx} ${cy} ${ex.toFixed(1)} ${ey.toFixed(1)}" marker-end="url(#gc-ah)"/>`;
+  }).join("");
+  return `<svg class="c-lines gc-lines" viewBox="0 0 100 ${H}" aria-hidden="true"><defs><marker id="gc-ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z"/></marker></defs>${lines}</svg>
+    <div class="c-center"><div id="gc3d" class="mini3d"></div></div>
+    ${nums.map((n, i) => {
+      const stock = n.records.reduce((s, r) => s + ((r.erp && r.erp.stock) || 0), 0);
+      const erp = n.records.some((r) => r.erp);
+      return `<button type="button" class="c-tag gc-tag ${n.pn === targetPn ? "on" : ""}" data-pn="${esc(n.pn)}" style="left:${pos[i][0]}%;top:${(pos[i][1] * 100) / H}%"
+        aria-pressed="${n.pn === targetPn}" title="לבחור את ${esc(n.pn)} כמק&quot;ט שנשאר">${tag(n.pn, n.pn === targetPn ? "stay" : "")}
+        <span class="c-src">${n.records.map((r) => sysBadge(r.source_kind, "")).join("")}<span class="small">${esc(n.records.map((r) => r.source).join(" · "))}</span></span>
+        <span class="small muted">${erp ? `${n0(stock)} במלאי` : "אין ב-ERP"}</span></button>`;
+    }).join("")}`;
+}
 
 export async function render({ el, param, setTitle, refreshStatus }) {
   const [g, list] = await Promise.all([get(`/api/runs/latest/groups/${encodeURIComponent(param)}`), get("/api/runs/latest/groups")]);
@@ -34,6 +74,10 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       <p><b>המק"ט המוצע להישאר:</b> ${pnChip(g.master_pn, true)} <span class="muted">(${esc(g.master_reason_he)})</span><span id="chosen"></span></p>
       <div class="row small">${g.pns.map((p) => pnChip(p, p === g.master_pn)).join(" ")}</div>
     </div></section>
+
+    <section class="panel"><div class="panel-h"><h2>${term("duplicate", "חלק אחד")} – ${n0(new Set(g.pns).size)} מק"טים</h2>
+        <span class="sub">לחיצה על מק"ט בוחרת אותו בתור ${term("target", "המק\"ט שנשאר")}; החצים מראים אילו מק"טים יוחלפו בו</span></div>
+      <div class="panel-b gc"><div class="constel" id="gc"></div><div class="gc-side" id="gc-side" aria-live="polite"></div></div></section>
 
     <section class="panel"><div class="panel-h"><h2>המודלים זה לצד זה</h2><span class="sub">גוררים כדי לסובב – כל התצוגות זזות יחד</span></div>
       <div class="panel-b">
@@ -80,6 +124,7 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       </tbody></table></div></section>`;
 
   // decision + history (re-rendered after saving without reloading the 3D views)
+  let onDecided = () => {};
   const paint = (d, saved = false) => {
     const [he, tone] = DECISION[d.decision || ""] || DECISION[""];
     el.querySelector("#dec-pill").innerHTML = `<span class="pill ${tone}">${he}</span>`;
@@ -98,7 +143,7 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       master: d.decision_master || master, labels: { approve: "אשר איחוד", reject: "לא אותו חלק", review: "לבדיקה" },
       onSaved: async () => {
         const fresh = await get(`/api/runs/latest/groups/${encodeURIComponent(g.id)}`);
-        paint(fresh, true); refreshStatus();
+        paint(fresh, true); onDecided(fresh); refreshStatus();
       },
     });
     // the way on: after a decision, the next group that still waits
@@ -112,6 +157,59 @@ export async function render({ el, param, setTitle, refreshStatus }) {
         <td>${h.master_uid ? pnChip(byUid[h.master_uid]?.pn || h.master_uid) : "—"}</td><td>${esc(h.note || "")}</td></tr>`).join("")}</tbody></table></details>` : "";
   };
   paint(g);
+
+  // the diagram: choose the part number that stays by clicking it; the impact follows at once
+  const nums = numbers(parts, g);
+  let sel = g.final_master_pn || g.master_pn, decided = g;
+  let mini = null;
+  const side = (d) => {
+    const n = nums.find((x) => x.pn === sel);
+    const imp = impactOf(g, n.uid) || {};
+    const approved = d.decision === "approve" && (d.final_master_pn || d.master_pn) === sel;
+    const others = nums.filter((x) => x.pn !== sel);
+    el.querySelector("#gc-side").innerHTML = `
+      <div class="gc-keep"><span class="small muted">${approved ? "אושר: נשאר" : sel === g.master_pn ? "מוצע להישאר" : "נבחר להישאר"}</span>${tag(sel, "stay big")}
+        <span class="small">${n.records.map((r) => esc(r.source)).join(" · ")}</span></div>
+      <p class="small">${others.length ? `${n0(others.length)} המק"טים האחרים יוחלפו בו: ${others.map((x) => pnChip(x.pn)).join(" ")}` : ""}</p>
+      <div class="readout mini" style="--cells:3">
+        <div class="cell"><span class="r-label">מק"טים שיבוטלו</span><span class="r-value">${n0(imp.redundant_pns)}</span></div>
+        <div class="cell"><span class="r-label">${term("bom", "שורות עץ מוצר")}</span><span class="r-value">${n0(imp.bom_lines_to_update)}</span></div>
+        <div class="cell"><span class="r-label">${term("stock", "מלאי שעובר")}</span><span class="r-value">${money(imp.redundant_stock_value, cur)}</span></div></div>
+      ${sel !== g.master_pn ? `<p class="small muted">התוכנה הציעה את ${pnChip(g.master_pn)}: ${esc(g.master_reason_he || "")}</p>` : ""}
+      ${can("engineer") ? (approved ? `<div class="row"><span class="pill ok">אושר על ידי ${esc(d.decision_by || "")}</span></div>`
+        : `<button type="button" class="btn primary" id="gc-ok">אישור: ${esc(sel)} נשאר</button>`) : ""}`;
+    const ok = el.querySelector("#gc-ok");
+    if (ok) ok.onclick = async () => {
+      try {
+        await send("POST", "/api/decisions", { target_type: "group", target_id: g.id, decision: "approve", master_uid: n.uid, note: "נבחר בציור" });
+        toast(`אושר: ${sel} נשאר, ${n0(others.length)} מק"טים יוחלפו בו`);
+        decided = await get(`/api/runs/latest/groups/${encodeURIComponent(g.id)}`);
+        paint(decided, true); draw(); refreshStatus();
+      } catch (e) { toast(e.message, true); }
+    };
+  };
+  const draw = () => {
+    const box = el.querySelector("#gc");
+    if (mini) { mini.dispose(); mini = null; }
+    box.innerHTML = diagram(nums, sel);
+    const c3 = box.querySelector("#gc3d");
+    if (withStep.length) { mini = new Viewer(c3, {}); mini.loadUrl(`/api/mesh/latest/${encodeURIComponent((withStep.find((p) => p.uid === g.master_uid) || withStep[0]).uid)}`); }
+    else c3.outerHTML = '<div class="gc-noshape">אין מודל תלת-ממד</div>';
+    box.querySelectorAll(".gc-tag").forEach((b) => (b.onclick = () => {
+      if (b.dataset.pn === sel) return;
+      sel = b.dataset.pn;
+      box.querySelectorAll(".gc-tag").forEach((x) => { const on = x.dataset.pn === sel; x.classList.toggle("on", on); x.setAttribute("aria-pressed", String(on));
+        x.querySelector(".ptag").classList.toggle("stay", on); });
+      box.querySelector(".gc-lines").outerHTML = diagram(nums, sel).split("</svg>")[0] + "</svg>";
+      side(decided);
+      // the decision below follows the choice
+      const ms = el.querySelector("#decision [data-master]");
+      if (ms) ms.value = nums.find((x) => x.pn === sel).uid;
+    }));
+    side(decided);
+  };
+  draw();
+  onDecided = (d) => { decided = d; sel = d.final_master_pn || d.master_pn; draw(); };
 
   // 3D views
   const viewers = [];
@@ -127,5 +225,5 @@ export async function render({ el, param, setTitle, refreshStatus }) {
     });
   });
   linkViewers(viewers);
-  return () => viewers.forEach((v) => v.dispose());
+  return () => { viewers.forEach((v) => v.dispose()); if (mini) mini.dispose(); };
 }
