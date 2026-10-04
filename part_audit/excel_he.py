@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from .decisions import effective_mapping, group_impact, row_decision
+from .decisions import chosen_target, effective_mapping, group_impact, row_decision
 from .explain import CATEGORY_HE
 
 HEAD = PatternFill("solid", fgColor="1E3A8A")
@@ -36,6 +36,23 @@ PAIR_DECISION_HE = {
 }
 SEVERITY_HE = {"high": "גבוהה", "medium": "בינונית", "low": "נמוכה", "info": "מידע"}
 STATE_HE = {"released": "משוחרר", "in_work": "בעבודה", "review": "בבדיקה", "obsolete": "מבוטל", "": "—"}
+
+
+def _put(ws, row: int, col: int, v):
+    """Write a cell; text that starts with '=' (names come from other systems) stays text, never a formula."""
+    cell = ws.cell(row, col, v)
+    if isinstance(v, str) and v.startswith("="):
+        cell.data_type = "s"
+    return cell
+
+
+def _target(g: dict, parts: dict, decisions: dict) -> str:
+    """The member whose part number stays: the approved choice if there is one, else the proposal."""
+    return chosen_target(g, decisions.get(f"group:{g['id']}"), parts)
+
+
+def _impact(g: dict, parts: dict, target: str) -> dict:
+    return group_impact(g, parts[target]["pn"], (parts[target].get("erp") or {}).get("pn"))
 
 
 def _sheet(wb: Workbook, title: str, headers: list[tuple[str, int]], rows: list[list], first: bool = False,
@@ -77,9 +94,7 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
     # money and BOM lines follow the target the engineer chose (where one was chosen)
     impacts = []
     for g in res["groups"]:
-        chosen = (decisions.get(f"group:{g['id']}") or {}).get("master_uid") or ""
-        target = chosen if chosen in g["members"] and parts[chosen]["pn"] else g["master_uid"]
-        impacts.append((g, group_impact(g, parts[target]["pn"])))
+        impacts.append((g, _impact(g, parts, _target(g, parts, decisions))))
     s["redundant_stock_value"] = round(sum(i["redundant_stock_value"] for g, i in impacts
                                            if (g.get("currency") or cur) == cur), 2)
     s["bom_lines_to_update"] = sum(i["bom_lines_to_update"] for _, i in impacts)
@@ -110,7 +125,7 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
         ("קבוצות כפילות", s["groups"], f"{s['groups_cross_source']} מהן חוצות מערכות; {s['groups_standard']} חלקים תקניים"),
         ("מק\"טים שניתן לבטל (אחרי אישור)", s["redundant_pns"], "מספר המק\"טים בכל קבוצה פחות אחד"),
         (f"שווי מלאי במק\"טים הכפולים ({cur})", s["redundant_stock_value"],
-         "כמות במלאי × עלות יחידה מה-ERP, רק למק\"טים שאינם המק\"ט המוצע"),
+         "כמות במלאי × עלות יחידה מה-ERP, בלי המק\"ט שנשאר בכל קבוצה"),
         ("שורות בעצי מוצר שיושפעו", s["bom_lines_to_update"], "שימושים של מק\"טים שיוחלפו"),
         ("זוגות כמעט זהים (לבדיקה)", s["near_pairs"], "מועמדים לתקינה – לא מאוחדים אוטומטית"),
         ("גיאומטריה זהה, מפרט שונה", s["spec_conflicts"], "למשל 2RS/ZZ או 12.9/A2 – לא לאחד"),
@@ -136,10 +151,10 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
     row += 1
     for src in res.get("sources", []):
         st = src.get("stats", {})
-        ws.cell(row, 1, src["name"]).font = BODY_FONT
+        _put(ws, row, 1, src["name"]).font = BODY_FONT
         ws.cell(row, 2, st.get("records") or st.get("erp_items") or 0)
-        ws.cell(row, 3, ("סימולטור מקומי; " if src.get("simulated") else "") +
-                ("שגיאות: " + "; ".join(src.get("errors") or []) if src.get("errors") else "נקרא בהצלחה"))
+        _put(ws, row, 3, ("סימולטור מקומי; " if src.get("simulated") else "") +
+             ("שגיאות: " + "; ".join(src.get("errors") or []) if src.get("errors") else "נקרא בהצלחה"))
         for col in (1, 2, 3):
             ws.cell(row, col).alignment = RIGHT
         row += 1
@@ -188,15 +203,15 @@ def write_workbook(res: dict, decisions: dict, path: str | Path, demo: bool = Fa
     rows = []
     for g in res["groups"]:
         dg = dec("group", g["id"])
-        chosen = (decisions.get(f"group:{g['id']}") or {}).get("master_uid") or ""
-        target = chosen if chosen in g["members"] and parts[chosen]["pn"] else g["master_uid"]
+        target = _target(g, parts, decisions)
         erp_by_pn = {e["pn"]: e for e in g["erp"]}
-        impact = group_impact(g, parts[target]["pn"])
+        impact = _impact(g, parts, target)
         for u in g["members"]:
             p = parts[u]
-            e = erp_by_pn.get(p["pn"]) or {}
+            # the ERP item the part is linked to (the ERP may write the number with other dashes)
+            e = erp_by_pn.get((p.get("erp") or {}).get("pn") or p["pn"]) or {}
             rows.append([g["id"], "חלק תקני" if g["category"] == "standard" else "גיאומטריה זהה", g["spec"],
-                         ("כן" if u == target else "") + (" (נבחר)" if u == target and target != g["master_uid"] else ""),
+                         ("כן" if u == target else "") + (" (אושר)" if u == target and target != g["master_uid"] else ""),
                          p["pn"], p["name"], p["source"],
                          STATE_HE.get(p["state_class"], p["state"]), p["revision"], p["material"], p["used_in"],
                          e.get("stock"), e.get("unit_cost"), e.get("value"), impact["redundant_stock_value"],

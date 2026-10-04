@@ -70,3 +70,35 @@ def test_static_export_never_overwrites_a_foreign_folder(tmp_path):
     r = subprocess.run([sys.executable, str(root / "tools" / "export_static.py"), "--workspace", str(tmp_path / "ws"),
                         "--out", str(tmp_path)], capture_output=True, text=True, timeout=120)
     assert r.returncode != 0 and (tmp_path / "keep.txt").read_text() == "my file"
+
+
+def test_erp_written_without_dashes_is_compared_through_the_link():
+    """The ERP writes '3001000' where the PDM writes '300-1000': same item, and the BOM is compared through it."""
+    from part_audit.model import BomLine, ErpItem
+    from part_audit.quality import erp_checks
+    asm = _rec(1, "300-1000", kind="assembly", name="מכלול הנעה", state_class="released")
+    child = _rec(2, "300-2000", name="פלטה 2", state_class="released")
+    erp = [ErpItem("erp", "3001000", "מכלול הנעה"), ErpItem("erp", "3002000", "פלטה 2")]
+    bom = [BomLine("erp", "3001000", "3002000", 3.0)]
+    out = erp_checks([child], [asm], erp, bom, {}, {asm.uid: [(child.uid, 2.0)]}, {r.uid: r for r in (asm, child)},
+                     {child.uid: [(asm.uid, 2.0)]})
+    types = [q["type"] for q in out]
+    assert "released_not_in_erp" not in types and "erp_without_cad" not in types
+    assert types.count("pn_format") == 2                             # the different writing is reported, low severity
+    diffs = [q["details"]["diffs"] for q in out if q["type"] == "erp_bom_mismatch"]
+    assert diffs == [[{"child": "3002000", "pdm_qty": 2.0, "erp_qty": 3.0}]]
+
+
+def test_impact_counts_the_target_by_its_erp_item():
+    from part_audit.decisions import group_impact, main_currency
+    g = {"erp": [{"pn": "9005961", "value": 100.0, "currency": "ILS"},
+                 {"pn": "900-5962", "value": 40.0, "currency": "ILS"}],
+         "pns": ["900-5961", "900-5962"],
+         "where_used": [{"via": "900-5961"}, {"via": "900-5962"}, {"via": "900-5962"}]}
+    imp = group_impact(g, "900-5961", "9005961")
+    assert imp["redundant_stock_value"] == 40.0 and imp["bom_lines_to_update"] == 2
+    assert group_impact(g, "900-5961")["redundant_stock_value"] == 140.0   # without the link: the target's own stock
+    # a tie between currencies does not depend on the order of the rows (or on the run)
+    assert main_currency(["USD", "ILS"]) == main_currency(["ILS", "USD"]) == "ILS"
+    assert main_currency(["USD", "ILS"], default="USD") == "USD"
+    assert main_currency(["EUR", "USD", "USD"]) == "USD" and main_currency([]) is None

@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__, connectors
 from ..demo import DEMO_DIR, demo_sources
 
-from ..decisions import effective_mapping, group_impact, row_decision
+from ..decisions import chosen_target, effective_mapping, group_impact, row_decision
 from ..project import ProjectSettings, audit_snapshot, collect
 from .store import Store
 
@@ -155,26 +155,26 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 results[rid] = res
         return rid, res
 
-    def with_decisions(rows: list[dict], kind: str, idx: dict | None = None) -> list[dict]:
+    def with_decisions(rows: list[dict], kind: str, res: dict | None = None) -> list[dict]:
+        """Rows with their latest decision; group rows (pass the run's result) also get the part number that
+        stays after the engineer's approval and, when that is not the proposed one, the impact for it."""
         dec = store.current_decisions()
+        idx, gby = (res["_index"], res["_groups"]) if res else ({}, {})
         out = []
         for r in rows:
             d = dec.get(f"{kind}:{r['id']}")
             row = {**r, "decision": d["decision"] if d else "", "decision_by": d["user"] if d else "",
                    "decision_at": d["created"] if d else "", "decision_note": d["note"] if d else "",
                    "decision_master": d["master_uid"] if d else ""}
-            if kind == "group" and idx is not None:  # the part number that stays, after the engineer's choice
-                g = groups_by_id().get(r["id"])
-                mu = row["decision_master"]
-                final = idx[mu]["pn"] if g and mu in g["members"] and idx[mu]["pn"] else r.get("master_pn")
-                row["final_master_pn"] = final
-                if g and final != g["master_pn"]:
-                    row.update({k: v for k, v in group_impact(g, final).items() if k != "currency"})
+            if kind == "group" and res is not None:
+                g = gby.get(r["id"])
+                tu = chosen_target(g, d, idx) if g else ""
+                row["final_master_pn"] = idx[tu]["pn"] if g and tu != g["master_uid"] else r.get("master_pn")
+                if g and tu != g["master_uid"]:
+                    t_erp = (idx[tu].get("erp") or {}).get("pn")
+                    row.update({k: v for k, v in group_impact(g, idx[tu]["pn"], t_erp).items() if k != "currency"})
             out.append(row)
         return out
-
-    def groups_by_id() -> dict:
-        return load_result("latest")[1]["_groups"]
 
     def step_path(rid: str, uid: str) -> str:
         snap = store.run_dir(rid) / "step_paths.json"
@@ -359,7 +359,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                     k = f"{srcs[i]}|{srcs[j]}"
                     cross[k] = cross.get(k, 0) + 1
         summ = dict(res["summary"])
-        final = with_decisions(res["groups"], "group", idx)
+        final = with_decisions(res["groups"], "group", res)
         summ["redundant_stock_value"] = round(sum(g["redundant_stock_value"] for g in final
                                                   if g.get("currency", summ["currency"]) == summ["currency"]), 2)
         summ["bom_lines_to_update"] = sum(g["bom_lines_to_update"] for g in final)
@@ -382,7 +382,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                                                "currency")}
                         | {"n_members": len(g["members"]), "n_used": len(g["where_used"]),
                            "family": idx[g["master_uid"]]["make_buy"]})
-        return with_decisions(rows, "group", idx)
+        return with_decisions(rows, "group", res)
 
     @app.get("/api/runs/{rid}/groups/{gid}")
     def group(rid: str, gid: str):
@@ -395,7 +395,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         pairs = [p for p in res["pairs"] if p["a"] in mem and p["b"] in mem]
         out = dict(g, parts=[idx[u] for u in g["members"]], pairs=pairs,
                    history=store.decision_history("group", gid))
-        return with_decisions([out], "group", idx)[0]
+        return with_decisions([out], "group", res)[0]
 
     @app.get("/api/runs/{rid}/pairs")
     def pairs(rid: str, category: str = ""):
@@ -585,7 +585,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             # every group decision records the target it is about: the one chosen now, else the one chosen before,
             # else the current proposal - so a bulk approval or a rescan never changes what was approved
             _, res = load_result("latest")
-            groups, idx, dec = groups_by_id(), res["_index"], store.current_decisions()
+            groups, idx, dec = res["_groups"], res["_index"], store.current_decisions()
             for tid in ids:
                 g = groups.get(tid)
                 if not g:

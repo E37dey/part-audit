@@ -21,18 +21,14 @@ function staticFile(file, kind = "json") {
 }
 const staticJson = (file) => staticFile(file);
 
+// decisions made in this tab, oldest first; seq is their exact order (two clicks can share a timestamp)
 const latestDecision = (kind, id) => [...memDecisions].reverse().find((x) => x.target_type === kind && x.target_id === id);
 const historyOf = (kind, id) => memDecisions.filter((x) => x.target_type === kind && x.target_id === id).reverse()
   .map((d) => ({ ...d, master_uid: d.master_uid || "" }));
 
-async function pnOf(uid) {
-  if (!staticCache.pnMap) staticCache.pnMap = staticJson("parts.json").then((rows) => Object.fromEntries(rows.map((r) => [r.uid, r.pn])));
-  return (await staticCache.pnMap)[uid] || "";
-}
-
-// same rules as the app: pn keys keep letters and number borders; impact follows the chosen target
+// the same rules as the app (names.pn_key, decisions.py): pn keys keep letters and number borders
 function pnKey(pn) {
-  const toks = String(pn || "").normalize("NFKC").toUpperCase().match(/[A-Z\u05D0-\u05EA]+|\d+/g) || [];
+  const toks = String(pn || "").normalize("NFKC").toUpperCase().match(/[A-Zא-ת]+|\d+/g) || [];
   let out = "", afterDigits = false;
   for (const t of toks) {
     if (/^\d+$/.test(t)) { out += (afterDigits ? "." : "") + (t.replace(/^0+/, "") || "0"); afterDigits = true; }
@@ -40,13 +36,27 @@ function pnKey(pn) {
   }
   return out;
 }
-function groupImpact(g, targetPn) {
-  const key = pnKey(targetPn);
-  const curs = g.erp.map((e) => e.currency).filter(Boolean);
-  const main = curs.length ? curs.sort((a, b) => curs.filter((x) => x === b).length - curs.filter((x) => x === a).length)[0] : null;
-  const value = g.erp.filter((e) => pnKey(e.pn) !== key && (!main || !e.currency || e.currency === main)).reduce((t, e) => t + (e.value || 0), 0);
+// the most common currency; a tie goes to alphabetical order (decisions.main_currency)
+function mainCurrency(curs) {
+  if (!curs.length) return null;
+  const n = (c) => curs.filter((x) => x === c).length;
+  return [...new Set(curs)].sort((a, b) => n(b) - n(a) || (a < b ? -1 : a > b ? 1 : 0))[0];
+}
+// what merging into the target changes; targetErpPn is the ERP item the target is linked to (other dashes)
+function groupImpact(g, targetPn, targetErpPn) {
+  const keys = new Set([pnKey(targetPn), pnKey(targetErpPn)].filter(Boolean));
+  const main = mainCurrency(g.erp.map((e) => e.currency).filter(Boolean));
+  const value = g.erp.filter((e) => !keys.has(pnKey(e.pn)) && (!main || !e.currency || e.currency === main)).reduce((t, e) => t + (e.value || 0), 0);
   return { redundant_stock_value: Math.round(value * 100) / 100,
-    bom_lines_to_update: g.where_used.filter((u) => key && u.via && pnKey(u.via) !== key).length };
+    bom_lines_to_update: g.where_used.filter((u) => keys.size && u.via && !keys.has(pnKey(u.via))).length };
+}
+// the member whose part number stays: the approved choice, else the proposal (decisions.chosen_target)
+function chosenTarget(g, d) {
+  const t = d && d.decision === "approve" && d.master_uid && g.parts.find((x) => x.uid === d.master_uid);
+  return t && t.pn ? t : g.parts.find((x) => x.uid === g.master_uid);
+}
+function impactFor(g, t) {
+  return groupImpact(g, t.pn, t.erp ? t.erp.pn : null);
 }
 
 async function applyDecisions(rows, kind) {
@@ -58,36 +68,35 @@ async function applyDecisions(rows, kind) {
     if (!d) { out.push(r); continue; }
     const row = { ...r, decision: d.decision, decision_note: d.note, decision_by: d.user, decision_at: d.created,
       decision_master: d.master_uid || "" };
-    if (kind === "group") {
-      row.final_master_pn = (d.master_uid && (await pnOf(d.master_uid))) || r.master_pn;
-      const g = details[r.id];
-      if (g && row.final_master_pn !== g.master_pn) Object.assign(row, groupImpact(g, row.final_master_pn));
+    const g = kind === "group" ? details[r.id] : null;
+    if (g) {
+      const t = chosenTarget(g, d);
+      row.final_master_pn = t.uid !== g.master_uid ? t.pn : r.master_pn;
+      if (t.uid !== g.master_uid) Object.assign(row, impactFor(g, t));
     }
     out.push(row);
   }
   return out;
 }
 
-// the same rule as decisions.effective_mapping: a group decision may name another target part number
+// the same rule as decisions.effective_mapping: a group approval may name another target part number
 async function effectiveMapping(rows) {
   const details = await staticJson("group_details.json");
   const overridden = new Set();
   const extra = [];
   for (const [gid, g] of Object.entries(details)) {
     const d = latestDecision("group", gid);
-    const target = d?.master_uid;
-    const t = target && g.parts.find((x) => x.uid === target);
-    if (!t || !t.pn || target === g.master_uid) continue;
+    const t = chosenTarget(g, d);
+    if (!t || t.uid === g.master_uid) continue;
     overridden.add(gid);
-    const key = (pn) => String(pn).toUpperCase().replace(/[^A-Z0-9]/g, "");
-    const seen = new Set([key(t.pn)]);
+    const seen = new Set([pnKey(t.pn)]);
     for (const r of g.parts) {
-      if (!r.pn || seen.has(key(r.pn))) continue;
-      seen.add(key(r.pn));
-      const pair = g.pairs.find((x) => (x.a === r.uid && x.b === target) || (x.b === r.uid && x.a === target));
+      if (!r.pn || seen.has(pnKey(r.pn))) continue;
+      seen.add(pnKey(r.pn));
+      const pair = g.pairs.find((x) => (x.a === r.uid && x.b === t.uid) || (x.b === r.uid && x.a === t.uid));
       extra.push({ id: `M~${gid}~${r.pn}~${t.pn}`, group_id: gid, old_pn: r.pn, old_uid: r.uid, old_name: r.name,
-        old_source: r.source, new_pn: t.pn, new_uid: target, new_name: t.name, reason_he: pair ? pair.reason_he : g.reason_he,
-        why_target_he: `נבחר על ידי ${d.user}`, confidence: pair ? pair.confidence : g.confidence,
+        old_source: r.source, new_pn: t.pn, new_uid: t.uid, new_name: t.name, reason_he: pair ? pair.reason_he : g.reason_he,
+        why_target_he: `היעד שאושר על ידי ${d.user}`, confidence: pair ? pair.confidence : g.confidence,
         where_used: g.where_used.filter((x) => x.via === r.pn).length, erp_stock: r.erp ? r.erp.stock : null,
         status: "ממתין לאישור", target_overridden: true });
     }
@@ -109,17 +118,18 @@ async function staticGet(path, params = {}) {
     const top = await applyDecisions(s.top_groups, "group");
     const decided = new Set(memDecisions.filter((d) => d.target_type === "group").map((d) => d.target_id));
     const approved = new Set(memDecisions.filter((d) => d.target_type === "group" && latestDecision("group", d.target_id)?.decision === "approve").map((d) => d.target_id));
-    // money and BOM lines follow targets chosen in this tab
+    // money and BOM lines follow the targets approved in this tab
     const summary = { ...s.summary };
     const details = await staticJson("group_details.json");
     for (const id of decided) {
-      const g = details[id], d = latestDecision("group", id);
-      const pn = d?.master_uid ? await pnOf(d.master_uid) : "";
-      if (!g || !pn || pn === g.master_pn) continue;
-      const imp = groupImpact(g, pn);
+      const g = details[id];
+      const t = g && chosenTarget(g, latestDecision("group", id));
+      if (!t || t.uid === g.master_uid) continue;
+      const imp = impactFor(g, t);
       if ((g.currency || summary.currency) === summary.currency) summary.redundant_stock_value += imp.redundant_stock_value - g.redundant_stock_value;
       summary.bom_lines_to_update += imp.bom_lines_to_update - g.bom_lines_to_update;
     }
+    summary.redundant_stock_value = Math.round(summary.redundant_stock_value * 100) / 100;
     return { ...s, summary, top_groups: top, decisions: { pending_groups: Math.max(0, s.decisions.pending_groups - decided.size),
       approved_groups: s.decisions.approved_groups + approved.size } };
   }
@@ -146,7 +156,7 @@ async function staticGet(path, params = {}) {
     // the row's own decision or its group's, whichever was made last
     return (await effectiveMapping(await staticJson("mapping.json"))).map((r) => {
       const own = latestDecision("mapping", r.id), grp = latestDecision("group", r.group_id);
-      const pick = grp && (!own || grp.created > own.created) ? grp : own;
+      const pick = grp && (!own || grp.seq > own.seq) ? grp : own;
       if (!pick) return { ...r, decision: "", inherited: false };
       return { ...r, decision: pick.decision, decision_by: pick.user, decision_at: pick.created, decision_note: pick.note,
         inherited: pick === grp };
@@ -205,7 +215,8 @@ export async function send(method, path, body) {
         // like the app: a group decision always records its target (chosen now, chosen before, or proposed)
         const master = body.target_type === "group"
           ? body.master_uid || latestDecision("group", id)?.master_uid || details[id]?.master_uid || "" : "";
-        memDecisions.push({ ...body, target_id: id, master_uid: master, created: now, user: body.user || "צופה בהדגמה" });
+        memDecisions.push({ ...body, target_id: id, master_uid: master, created: now, user: body.user || "צופה בהדגמה",
+          seq: memDecisions.length + 1 });
       });
       return { ok: true, saved: ids.length };
     }

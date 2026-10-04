@@ -81,6 +81,19 @@ def test_mapping_has_only_real_part_number_changes(result):
     assert [(m["old_pn"], m["new_pn"]) for m in rows] == [("100-0002", "100-0001")]
 
 
+def test_erp_that_writes_the_number_without_dashes(plant, tmp_path):
+    """ERP item '1000001' is the CAD's '100-0001': its stock is the target's own, not a duplicate's."""
+    erp = tmp_path / "erp.csv"
+    erp.write_text(ERP_CSV.replace("100-0001,", "1000001,"), encoding="utf-8")
+    srcs = [_sources(plant)[0], {"id": "erp", "kind": "erp_file", "name": "ERP", "config": {"path": str(erp)},
+                                 "enabled": True}]
+    res = audit_snapshot(collect(srcs, tmp_path / "c"), ProjectSettings(workers=1), tmp_path / "c")
+    g = next(x for x in res["groups"] if "100-0002" in x["pns"])
+    assert g["master_pn"] == "100-0001"
+    assert g["redundant_stock_value"] == pytest.approx(5 * 48)
+    assert {e["pn"]: e["is_master"] for e in g["erp"]} == {"1000001": True, "100-0002": False}
+
+
 def test_quality_findings(result):
     types = {q["type"] for q in result["quality"] + result["erp_issues"]}
     assert "erp_without_cad" in types                            # 999-9999 has no model
@@ -96,6 +109,21 @@ def test_engineer_can_choose_another_target(result):
     assert [(m["old_pn"], m["new_pn"]) for m in rows] == [("100-0001", "100-0002")]
     base = next(m for m in result["mapping"] if m["group_id"] == g["id"])
     assert rows[0]["target_overridden"] and rows[0]["id"] != base["id"]
+    assert rows[0]["why_target_he"] == "היעד שאושר על ידי דנה"
+
+
+def test_a_target_counts_only_once_approved(result):
+    """A target picked together with 'review' or 'reject' is remembered but changes nothing yet."""
+    from part_audit.decisions import master_pn
+    g = next(x for x in result["groups"] if "100-0002" in x["pns"])
+    other = _uid(result, "100-0002")
+    idx = {p["uid"]: p for p in result["parts"]}
+    for decision in ("review", "reject"):
+        d = {"decision": decision, "master_uid": other, "user": "דנה", "note": "", "created": ""}
+        rows = [m for m in effective_mapping(result, {f"group:{g['id']}": d}) if m["group_id"] == g["id"]]
+        assert [(m["old_pn"], m["new_pn"]) for m in rows] == [("100-0002", "100-0001")]
+        assert master_pn(idx, g, d) == "100-0001"
+    assert master_pn(idx, g, {"decision": "approve", "master_uid": other}) == "100-0002"
 
 
 def test_later_decision_wins_between_row_and_group(result):
@@ -108,6 +136,12 @@ def test_later_decision_wins_between_row_and_group(result):
     d = row_decision(m, {f"mapping:{m['id']}": {**row_ok, "created": "2026-10-04T12:00:00"},
                          f"group:{m['group_id']}": grp_no})
     assert d["decision"] == "approve" and not d["inherited"]          # a later row decision is an exception
+    # two clicks in the same second: the order they were saved in decides (the store's ids)
+    t = "2026-10-04T10:00:00"
+    row_ok, grp_no = {**row_ok, "id": 1, "created": t}, {**grp_no, "id": 2, "created": t}
+    assert row_decision(m, {f"mapping:{m['id']}": row_ok, f"group:{m['group_id']}": grp_no})["decision"] == "reject"
+    assert row_decision(m, {f"mapping:{m['id']}": {**row_ok, "id": 3},
+                            f"group:{m['group_id']}": grp_no})["decision"] == "approve"
 
 
 def test_excel_is_hebrew_rtl_and_carries_decisions(result, tmp_path):
@@ -125,6 +159,11 @@ def test_excel_is_hebrew_rtl_and_carries_decisions(result, tmp_path):
     # a name that starts with '=' stays text (never a live formula)
     cells = [c for r in wb["כל החלקים"].iter_rows(min_row=2) for c in r if isinstance(c.value, str) and c.value.startswith("=")]
     assert cells and all(c.data_type == "s" for c in cells)
+    # the same for the names of the systems on the summary sheet
+    odd = {**result, "sources": [{**x, "name": "=HYPERLINK(\"x\")"} for x in result["sources"]]}
+    wb = load_workbook(write_workbook(odd, {}, tmp_path / "r2.xlsx"))
+    cells = [c for r in wb["סיכום"].iter_rows() for c in r if isinstance(c.value, str) and c.value.startswith("=")]
+    assert len(cells) == len(result["sources"]) and all(c.data_type == "s" for c in cells)
 
 
 # ------------------------------------------------------------------------------------------------ web API

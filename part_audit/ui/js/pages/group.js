@@ -44,9 +44,9 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       <div class="panel"><div class="panel-h"><h2>מה ישתנה אם מאחדים</h2></div>
         <div class="panel-b stack">
           <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-            <div class="kpi"><span class="label">מק"טים שיבוטלו</span><span class="value">${n0(g.redundant_pns)}</span></div>
-            <div class="kpi"><span class="label">שורות עץ מוצר לעדכון</span><span class="value">${n0(g.bom_lines_to_update)}</span></div>
-            <div class="kpi"><span class="label">מלאי במק"טים הכפולים</span><span class="value" style="font-size:1.4rem">${money(g.redundant_stock_value, cur)}</span></div>
+            <div class="kpi"><span class="label">מק"טים שיבוטלו</span><span class="value" id="k-red"></span></div>
+            <div class="kpi"><span class="label">שורות עץ מוצר לעדכון</span><span class="value" id="k-bom"></span></div>
+            <div class="kpi"><span class="label">מלאי במק"טים הכפולים</span><span class="value" id="k-val" style="font-size:1.4rem"></span></div>
           </div>
           ${g.products?.length ? `<div><b class="small">מוצרים שמשתמשים בחלק:</b> ${g.products.map((x) => `<span class="chip">${esc(x)}</span>`).join(" ")}</div>` : ""}
         </div>
@@ -75,8 +75,15 @@ export async function render({ el, param, setTitle, refreshStatus }) {
   const paint = (d) => {
     const [he, tone] = DECISION[d.decision || ""] || DECISION[""];
     el.querySelector("#dec-pill").innerHTML = `<span class="pill ${tone}">${he}</span>`;
+    // an approved target replaces the proposal; a target picked with "review" is shown but changes nothing yet
+    const picked = d.decision_master && d.decision_master !== g.master_uid ? byUid[d.decision_master] : null;
     el.querySelector("#chosen").innerHTML = d.final_master_pn && d.final_master_pn !== g.master_pn
-      ? ` · <b>המאשר בחר:</b> ${pnChip(d.final_master_pn, true)}` : "";
+      ? ` · <b>אושר כיעד:</b> ${pnChip(d.final_master_pn, true)}`
+      : picked && d.decision === "review" ? ` · <b>נבחר לבדיקה:</b> ${pnChip(picked.pn)}` : "";
+    // the impact follows the part number that stays
+    el.querySelector("#k-red").textContent = n0(d.redundant_pns);
+    el.querySelector("#k-bom").textContent = n0(d.bom_lines_to_update);
+    el.querySelector("#k-val").textContent = money(d.redundant_stock_value, cur);
     decisionBar(el.querySelector("#decision"), {
       type: "group", id: g.id, current: d.decision, note: d.decision_note, by: d.decision_by, at: d.decision_at,
       masterChoices: parts.filter((p) => p.pn).map((p) => ({ value: p.uid, label: `${p.pn} · ${p.source}` })),

@@ -51,7 +51,7 @@ export async function render({ el, setTitle, refreshStatus, state }) {
     tb.innerHTML = r.slice(0, f.shown).map((g) => `<tr class="click" data-id="${g.id}">
       <td class="sel-col"><input type="checkbox" data-sel="${g.id}" ${sel.has(g.id) ? "checked" : ""} aria-label="בחר"></td>
       <td>${esc(g.name)}${g.spec ? `<div class="small muted mono">${esc(g.spec)}</div>` : ""}</td><td>${groupPill(g.category)}</td>
-      <td class="nowrap">${pnChip(g.final_master_pn || g.master_pn, true)}${(g.final_master_pn || g.master_pn) !== g.master_pn ? '<div class="small muted">נבחר על ידי המאשר</div>' : ""}</td>
+      <td class="nowrap">${pnChip(g.final_master_pn || g.master_pn, true)}${(g.final_master_pn || g.master_pn) !== g.master_pn ? '<div class="small muted">אושר על ידי המאשר</div>' : ""}</td>
       <td>${g.pns.filter((p) => p !== (g.final_master_pn || g.master_pn)).map((p) => pnChip(p)).join(" ")}</td>
       <td class="nowrap">${g.sources.map((x) => sysBadge(kindOf[x], "")).join("")}</td><td class="n">${n0(g.n_used)}</td>
       <td class="n">${money(g.redundant_stock_value)}</td><td class="n">${confBar(g.confidence)}</td><td>${decisionPill(g.decision)}</td></tr>`).join("")

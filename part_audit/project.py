@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import connectors
-from .decisions import group_impact
+from .decisions import group_impact, main_currency as pick_currency
 from .explain import CATEGORY_HE, CATEGORY_HINT_HE, pair_reason_he
 from .model import ErpItem, PartRecord, Snapshot, SourceInfo
 from .names import is_generic_product_name, parse_name, pn_core, pn_key, pn_letters_compatible
@@ -251,6 +251,10 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
     parts = [r for r in snap.records if r.kind == "part"]
     assemblies = [r for r in snap.records if r.kind == "assembly"]
     erp_by_key = {pn_key(e.pn): e for e in snap.erp_items}
+
+    def erp_pn(r: PartRecord) -> str:
+        """The part number as the ERP writes it (through the link), for ERP BOM lookups."""
+        return links[r.uid].pn if r.uid in links else r.pn
     erp_parents: dict[str, list] = defaultdict(list)
     for b in snap.erp_bom:
         erp_parents[pn_key(b.child)].append((b.parent, b.qty))
@@ -292,7 +296,7 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
         def master_key(r: PartRecord):
             e = links.get(r.uid)
             return (0 if e else 1, 0 if r.state_class == "released" else (1 if r.state_class in ("review", "in_work") else 2),
-                    -len(parents_of.get(r.uid, [])) - len(erp_parents.get(pn_key(r.pn), [])) if r.pn else 0,
+                    -len(parents_of.get(r.uid, [])) - len(erp_parents.get(pn_key(erp_pn(r)), [])) if r.pn else 0,
                     -(e.stock_total if e else 0), 0 if r.step_path else 1, r.created or "9999", r.pn or "~")
         master = sorted(members, key=master_key)[0]
         why = []
@@ -300,7 +304,7 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
             why.append("קיים ב-ERP")
         if master.state_class == "released":
             why.append("משוחרר")
-        n_used = len(parents_of.get(master.uid, [])) + (len(erp_parents.get(pn_key(master.pn), [])) if master.pn else 0)
+        n_used = len(parents_of.get(master.uid, [])) + (len(erp_parents.get(pn_key(erp_pn(master)), [])) if master.pn else 0)
         if n_used:
             why.append(f"בשימוש ב-{n_used} עצי מוצר")
         if links.get(master.uid) and links[master.uid].stock_total:
@@ -315,14 +319,15 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
                 erp_rows.append({"pn": e.pn, "description": e.description, "stock": e.stock_total, "unit_cost": e.unit_cost,
                                  "value": val, "currency": e.currency or settings.currency, "status": e.status,
                                  "active": e.active, "supplier": e.supplier,
-                                 "is_master": bool(master.pn) and pn_key(e.pn) == pn_key(master.pn)})
+                                 "is_master": (links[master.uid].pn == e.pn) if master.uid in links
+                                 else (bool(master.pn) and pn_key(e.pn) == pn_key(master.pn))})
         used = []
         for r in members:
             for par, q in parents_of.get(r.uid, []):
                 pr = by_uid[par]
                 used.append({"uid": pr.uid, "pn": pr.pn, "name": pr.name, "source": src_name.get(pr.source_id, pr.source_id),
                              "qty": q, "via": r.pn, "state": pr.state})
-            for ppn, q in erp_parents.get(pn_key(r.pn), []) if r.pn else []:
+            for ppn, q in erp_parents.get(pn_key(erp_pn(r)), []) if r.pn else []:
                 used.append({"uid": "", "pn": ppn, "name": (erp_by_key.get(pn_key(ppn)).description
                                                             if erp_by_key.get(pn_key(ppn)) else ""),
                              "source": "ERP", "qty": q, "via": r.pn, "state": ""})
@@ -335,7 +340,8 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
         best = max((pair_by_key[(x, y)] for x in gm for y in gm if (x, y) in pair_by_key
                     and pair_by_key[(x, y)]["category"] in ("identical", "standard_part")),
                    key=lambda r: r["confidence"], default=None)
-        impact = group_impact({"erp": erp_rows, "pns": pns, "where_used": used}, master.pn or "")
+        impact = group_impact({"erp": erp_rows, "pns": pns, "where_used": used}, master.pn or "",
+                              links[master.uid].pn if master.uid in links else None)
         main_cur = impact["currency"]
         row = {"id": gid, "members": gm, "category": category, "pns": pns,
                "sources": sorted({src_name.get(r.source_id, r.source_id) for r in members}),
@@ -468,10 +474,7 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
 
     # ------------------------------------------------------------------ summary
     # money is added up in one currency only (the most common one); groups priced in another are counted apart
-    cur_count = defaultdict(int)
-    for g in group_rows:
-        cur_count[g["currency"]] += 1
-    main_currency = max(cur_count, key=cur_count.get) if cur_count else settings.currency
+    main_currency = pick_currency([g["currency"] for g in group_rows], settings.currency) or settings.currency
     red_value = sum(g["redundant_stock_value"] for g in group_rows if g["currency"] == main_currency)
     sev = defaultdict(int)
     for q in quality + erp_issues:

@@ -206,15 +206,18 @@ def erp_checks(parts: list, assemblies: list, erp_items: list, erp_bom: list, it
     erp_children: dict[str, dict[str, float]] = defaultdict(dict)
     for b in erp_bom:
         erp_children[pn_key(b.parent)][pn_key(b.child)] = erp_children[pn_key(b.parent)].get(pn_key(b.child), 0) + b.qty
+    def erp_key(pn: str) -> str:   # the number as the ERP writes it ('2002269' in PDM -> '200-2269' in ERP)
+        e = erp_of(pn)
+        return pn_key(e.pn) if e is not None else pn_key(pn)
     for a in assemblies:
-        if not a.pn or pn_key(a.pn) not in erp_children:
+        if not a.pn or erp_key(a.pn) not in erp_children:
             continue
         pdm = defaultdict(float)
         for ch_uid, qty in children_of.get(a.uid, []):
             ch = by_uid.get(ch_uid)
             if ch is not None and ch.pn:
-                pdm[pn_key(ch.pn)] += qty
-        erp = erp_children[pn_key(a.pn)]
+                pdm[erp_key(ch.pn)] += qty
+        erp = erp_children[erp_key(a.pn)]
         diffs = []
         for k in sorted(set(pdm) | set(erp)):
             if abs(pdm.get(k, 0) - erp.get(k, 0)) > 1e-9:
