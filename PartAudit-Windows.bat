@@ -26,6 +26,8 @@ if errorlevel 1 (
   copy /y requirements.txt "%VENV%\requirements.installed" >nul
 )
 
+if /i "%~1"=="--setup-only" goto end
+
 echo.
 echo PartAudit is starting. The browser opens by itself.
 echo Keep this window open while you work; close it to stop PartAudit.

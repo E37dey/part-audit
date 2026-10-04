@@ -304,7 +304,7 @@ def run_server(args) -> int:
         print("Team mode needs an admin account first. Create one with:\n"
               f"  python -m part_audit users add <name> --role admin --workspace \"{args.workspace}\"\n"
               "or in the app (Settings > Team) on this computer.", file=sys.stderr)
-        return 2
+        return 3
     if bool(args.cert) != bool(args.key):
         print("--cert and --key go together", file=sys.stderr)
         return 2

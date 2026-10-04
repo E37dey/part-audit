@@ -17,7 +17,7 @@
 
 | מערכת | מה עושים |
 |---|---|
-| Windows | לחיצה כפולה על `PartAudit-Windows.bat` |
+| Windows | מריצים את `PartAudit-Setup-2.1.0.exe` (התקנה למשתמש בלי הרשאות מנהל, עם קיצורי דרך בתפריט התחל), או לחיצה כפולה על `PartAudit-Windows.bat` מהתיקייה |
 | Mac | בפעם הראשונה: קליק ימני על `PartAudit-Mac.command` ואז "פתח" (macOS חוסם קבצים שהורדו מהאינטרנט). בפעמים הבאות מספיקה לחיצה כפולה |
 | Linux | `./PartAudit-Linux.sh` |
 
@@ -25,7 +25,18 @@
 - ההתקנה יוצרת סביבת Python פרטית: ב-Windows בתיקייה `%LOCALAPPDATA%\PartAudit`, ובמק בתיקייה `~/Library/Application Support/PartAudit`. שום דבר אחר במחשב לא משתנה.
 - הדפדפן נפתח לבד בכתובת `http://127.0.0.1:8765`. החלון השחור צריך להישאר פתוח בזמן העבודה, וסגירה שלו עוצרת את התוכנה.
 - התוצאות, המטמון וקבצי ה-Excel נשמרים בתיקייה `PartAudit` שבתיקיית הבית.
-- **הסרה:** מוחקים את תיקיית התוכנה ואת שתי התיקיות שלמעלה.
+- **הסרה:** מוחקים את תיקיית התוכנה ואת שתי התיקיות שלמעלה. אחרי התקנה מה-Setup: "הסרת PartAudit" בתפריט התחל (תיקיית העבודה נשארת).
+- ה-Setup לא חתום דיגיטלית, ולכן Windows עשוי להזהיר: "מידע נוסף" ואז "הפעל בכל זאת".
+
+### שרת צוות
+
+כדי שכל הצוות יעבוד על אותם נתונים, מחשב אחד משמש שרת וכל אחד נכנס אליו מהדפדפן:
+
+1. במחשב שישמש שרת מתקינים עם האפשרות "שרת צוות וסריקה מתוזמנת" ומפעילים את **"PartAudit – שרת צוות"** (או `PartAudit-Server.bat`; במק וב-Linux: `python -m part_audit serve`).
+2. בפעם הראשונה השרת מבקש ליצור משתמש מנהל. את שאר המשתמשים המנהל מוסיף באפליקציה: הגדרות > צוות והרשאות.
+3. השרת מציג את הכתובת, למשל `http://plant-server:8765`. כל אחד פותח אותה ונכנס עם המשתמש שלו. Windows ישאל אם לאפשר ל-Python גישה לרשת – מאשרים רק "רשתות פרטיות".
+4. שלוש הרשאות: **צפייה**, **מהנדס** (מחליט על כפילויות, מריץ סריקה ובדיקת חלק חדש) ו**מנהל** (מקורות, הגדרות ומשתמשים).
+5. בלי `--cert` הסיסמאות עוברות ברשת בלי הצפנה: ברשת פתוחה מפעילים עם תעודה (`--cert server.pem --key server.key`) או מאחורי ה-HTTPS של החברה.
 
 ## איך מתחילים
 
@@ -50,6 +61,9 @@
 7. **מגמות**: המספרים של כל סריקה לאורך זמן – כמה כפילויות נוצרו ונפתרו בכל סריקה, ואיך השתנו הכפילויות, המלאי על מק"טים כפולים ובעיות הנתונים. כל נקודה היא סריקה אמיתית.
 8. **עבודה בצוות**: מחשב אחד מפעיל את "שרת הצוות" וכל אחד נכנס מהדפדפן עם משתמש וסיסמה (או עם חשבון החברה – Microsoft Entra ID, Google, Okta). שלוש הרשאות: צפייה, מהנדס (מחליט על כפילויות) ומנהל. ליד כל החלטה נרשם מי קיבל אותה.
 9. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
+10. **לומדים תוך כדי**: מילים עם קו מנוקד (מק"ט, רוויזיה, עץ מוצר, PDM, ERP, כפילות…) מסבירות את עצמן בלחיצה, עם ציור קטן. "מצב למידה" מוסיף לכל מסך הסבר קצר: מה רואים ומה עושים. המסך **"מק"ט – מאיפה מתחילים"** עובר בשישה צעדים על חלק אמיתי מהסריקה: תעודת הזהות שלו, הגרסאות, איפה הוא רשום, באילו מוצרים הוא נמצא, למה כפילות עולה כסף ואיך מתקנים.
+11. **בקרת תצורה**: בוחרים מוצר ורואים את כל עץ המוצר שלו. ליד כל רכיב מסומן בצבע ובסמל מה נמצא בו – כפילות, רכיב לא משוחרר או מבוטל, פער מול ה-ERP, בעיית נתונים, חלק כמעט זהה. לחיצה על רכיב מסבירה מה הבעיה, למה היא חשובה ומה עושים. "השוואה ל-ERP" מראה שורה מול שורה איפה עץ המוצר ב-ERP שונה.
+12. **חבילת שינוי**: מכל ההחלטות שאושרו נבנית רשימת עבודה לכל מערכת – אילו שורות להחליף בעצי המוצר, אילו מק"טים לבטל ואיזה מלאי להעביר – עם "לפני ואחרי" לכל עץ מוצר, ב-Excel או CSV. בקבוצת כפילות בוחרים בלחיצה איזה מק"ט נשאר ורואים מיד מה זה משנה.
 
 > **חשוב:** החיבורים נכתבו לפי התיעוד הפומבי של כל יצרן, ונבדקו מול סימולטורים שמחקים את ה-API. הם עוד לא נבדקו מול שרת אמיתי של לקוח. רשימת הפרטים שעוד לא אומתו מופיעה בתוכנה, בכרטיס של כל מערכת.
 
@@ -188,6 +202,25 @@ changed in each source's mapping settings.
 * Management report (`#/report`): a two-page A4 document of the measured numbers (print or save as PDF in the
   browser; also in the online copy). A saving per year appears only when the user entered their own cost
   assumption, and it is labelled as such.
+* Team mode (`server/auth.py`, `server/oidc.py`, `python -m part_audit serve`): users with roles (viewer / engineer /
+  admin), checked per endpoint on the server; PBKDF2-SHA256 passwords (600,000 iterations), server-side sessions,
+  a sign-in throttle, same-origin checks, a Host header that must be a name or an address. Optional company sign-in
+  with OpenID Connect (authorization code + PKCE; the ID token's RS256 signature checked in pure Python against the
+  provider's published keys - tested against OpenSSL signatures and a simulated provider). A company sign-in never
+  takes over an account that has a password. The default is unchanged: this computer only, nobody signs in.
+* Learn as you go (`ui/js/learn.js`, `ui/js/art.js`): key terms explain themselves (a short text and a line
+  drawing); learning mode adds a "what you see here / what to do" card to every screen. `#/learn` follows one real
+  part of the latest scan through six chapters (`config.learn_examples` picks a part with another part number).
+* Configuration control (`config.py`, `#/config`): every top-level product, its BOM tree from the PDM / PLM with
+  one mark per finding on each item (duplicate with the part number that stays, lifecycle, ERP gap, data issue,
+  near-identical), how many items need attention, and every assembly's BOM next to the ERP's, line by line.
+* Change package (`package.py`, `#/package`): from the approved decisions, per system: BOM lines to replace (merged
+  when the part number that stays is already in the assembly), records to mark as replaced, ERP stock to move and
+  close for purchasing; every affected BOM before and after; Excel / CSV. Prepared only - never written to any
+  system. The online copy builds it in the browser from data exported per group and possible target, with the same
+  rules (a test runs both and compares). No vendor-specific import format: those could not be checked here.
+* Windows installer (`installer/PartAudit.nsi`, `tools/build_installer.py`): NSIS, per user (no admin rights),
+  Start-menu shortcuts for the app, the team server and a scan; not signed.
 * Pre-release check (`part_audit/precheck.py`): one new STEP file against the latest scan, with the scan's own
   engine and thresholds (hashes, geometry incl. unit mistakes, aligned surfaces, standard-part spec, names, the
   planned part number in every record and in the ERP). The answer names the part number to use; if the part is

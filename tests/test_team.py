@@ -345,7 +345,7 @@ def test_cli_users_and_server_needs_an_admin(tmp_path, monkeypatch, capsys):
 
     from part_audit.cli import main
     ws = str(tmp_path / "ws")
-    assert main(["serve", "--workspace", ws]) == 2
+    assert main(["serve", "--workspace", ws]) == 3          # 3 = no admin yet (the Windows launcher offers to create one)
     assert "admin" in capsys.readouterr().err
     monkeypatch.setattr("sys.stdin", io.StringIO("Gear-box 42!\n"))
     assert main(["users", "add", "dana", "--role", "admin", "--display", "דנה", "--password-stdin", "--workspace", ws]) == 0
