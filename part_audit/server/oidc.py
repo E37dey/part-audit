@@ -254,18 +254,34 @@ def finish(cfg: dict, client_secret: str, code: str, pending: dict) -> dict:
         return verify_id_token(idt, keys=jwks(d["jwks_uri"], force=True), **kw)
 
 
+def _verified(v) -> bool | None:
+    """email_verified as sent: true / false, also as the strings "true" / "false"; None when not sent."""
+    if isinstance(v, str):
+        return {"true": True, "false": False}.get(v.strip().lower(), False)
+    return None if v is None else bool(v)
+
+
 def identity(cfg: dict, claims: dict) -> dict:
-    """Who signed in: a stable key, the e-mail (when there is one) and a display name; checks the allowed domains."""
-    email = str(claims.get("email") or claims.get("preferred_username") or claims.get("upn") or "").strip().lower()
-    if claims.get("email_verified") is False:
+    """Who signed in: a stable key (issuer + subject), the e-mail of the "email" claim, the sign-in name
+    (preferred_username / upn, which some providers let users change - used only to name a new account), and
+    whether the e-mail may identify an existing account: the provider says it is verified, or it says nothing
+    and the e-mail is in a company domain set in PartAudit. Checks the allowed domains."""
+    email = str(claims.get("email") or "").strip().lower()
+    email = email if "@" in email else ""
+    login = str(claims.get("preferred_username") or claims.get("upn") or "").strip().lower()
+    verified = _verified(claims.get("email_verified"))
+    if email and verified is False:
         raise OIDCError("כתובת המייל בחשבון לא אומתה אצל ספק הזהות")
     domains = [x.strip().lower().lstrip("@") for x in str(cfg.get("domains") or "").replace(";", ",").split(",")
                if x.strip()]
-    if domains and ("@" not in email or email.rsplit("@", 1)[1] not in domains):
+    shown = email or login
+    in_domain = "@" in shown and shown.rsplit("@", 1)[1] in domains
+    if domains and not in_domain:
         raise OIDCError("החשבון לא שייך לדומיין של החברה שהוגדר ב-PartAudit")
     name = str(claims.get("name") or " ".join(x for x in (claims.get("given_name"), claims.get("family_name")) if x)
-               or email or claims["sub"])
-    return {"sub": f"{claims['iss']}|{claims['sub']}", "email": email if "@" in email else "", "name": name[:120]}
+               or email or login or claims["sub"])
+    return {"sub": f"{claims['iss']}|{claims['sub']}", "email": email, "login": login, "name": name[:120],
+            "email_trusted": bool(email) and (verified is True or (verified is None and bool(domains) and in_domain))}
 
 
 def check_config(cfg: dict) -> dict:

@@ -190,13 +190,22 @@ def test_id_token_checks(key):
 def test_identity_and_domains():
     cfg = {"domains": "factory.co.il"}
     ident = oidc.identity(cfg, _claims())
-    assert ident == {"sub": "https://idp.example.com|u-1", "email": "dana@factory.co.il", "name": "דנה לוי"}
+    assert ident == {"sub": "https://idp.example.com|u-1", "email": "dana@factory.co.il", "login": "", "name": "דנה לוי",
+                     "email_trusted": True}                    # not said to be verified, but in the company domain
     with pytest.raises(oidc.OIDCError, match="דומיין"):
         oidc.identity(cfg, _claims(email="x@gmail.com"))
-    with pytest.raises(oidc.OIDCError, match="אומתה"):
-        oidc.identity({}, _claims(email_verified=False))
-    # Microsoft Entra ID: no e-mail claim, the user name is in preferred_username
-    assert oidc.identity({}, {**_claims(email=None), "preferred_username": "Dana@Factory.co.il"})["email"] == "dana@factory.co.il"
+    for v in (False, "false", "FALSE"):
+        with pytest.raises(oidc.OIDCError, match="אומתה"):
+            oidc.identity({}, _claims(email_verified=v))
+    # without a company domain only a verified e-mail may identify an existing account
+    assert oidc.identity({}, _claims())["email_trusted"] is False
+    assert oidc.identity({}, _claims(email_verified=True))["email_trusted"] is True
+    assert oidc.identity({}, _claims(email_verified="true"))["email_trusted"] is True
+    # Microsoft Entra ID without the e-mail claim: the sign-in name names a new account, it never identifies one
+    ent = oidc.identity(cfg, {**_claims(email=None), "preferred_username": "Dana@Factory.co.il"})
+    assert ent["email"] == "" and ent["login"] == "dana@factory.co.il" and ent["email_trusted"] is False
+    with pytest.raises(oidc.OIDCError, match="דומיין"):
+        oidc.identity(cfg, {**_claims(email=None), "preferred_username": "dana@other.com"})
 
 
 def test_provider_addresses_must_be_https():
@@ -453,15 +462,55 @@ def test_company_sign_in_refuses_tampering(team, key, monkeypatch):
     monkeypatch.setattr(oidc, "http_json", keys_of_the_real_provider)
     r, _ = idp.sign_in(c)
     assert "החתימה" in _error(r) and c.get("/api/auth/me").json()["user"] is None
-    # an existing account with the same e-mail is linked, and keeps its role; without auto-create a stranger is refused
+    # an account an admin added for company sign-in (no password) is linked by a verified e-mail, and keeps its role;
+    # without auto-create a stranger is refused
     idp.key = key
     st.add_user("dana@factory.co.il", "engineer", pw_hash=None)
     st.set_settings({"oidc": {**oidc.DEFAULT_OIDC, "enabled": True, "issuer": "https://idp.example.com",
                               "client_id": "partaudit", "auto_create": False}})
     monkeypatch.setattr(oidc, "http_json", idp.http_json)
-    r, _ = idp.sign_in(c)
+    r, _ = idp.sign_in(c)                                  # the provider does not say the e-mail is verified
+    assert "עוד לא נוסף" in _error(r)
+    r, _ = idp.sign_in(c, email_verified=True)
     assert r.status_code == 303 and r.headers["location"] == "/"
     assert c.get("/api/auth/me").json()["user"]["role"] == "engineer"
     c.post("/api/auth/logout")
-    r, _ = idp.sign_in(c, sub="u-3", email="new@factory.co.il")
+    r, _ = idp.sign_in(c, sub="u-3", email="new@factory.co.il", email_verified=True)
     assert "עוד לא נוסף" in _error(r)
+
+
+def test_company_sign_in_never_takes_over_a_password_account(team, key, monkeypatch):
+    c, st = team
+    idp = FakeProvider(key)
+    monkeypatch.setattr(oidc, "http_json", idp.http_json)
+    st.add_user("boss@factory.co.il", "admin", pw_hash=auth.hash_password("Boss-Passw0rd!"))
+    st.set_settings({"oidc": {**oidc.DEFAULT_OIDC, "enabled": True, "issuer": "https://idp.example.com",
+                              "client_id": "partaudit", "auto_create": True, "domains": "factory.co.il"}})
+    st.set_secret(oidc.SECRET, "s3cret")
+    # another identity whose sign-in name was chosen to match: a new viewer account, not the admin
+    r, _ = idp.sign_in(c, sub="someone-else", email=None, preferred_username="boss@factory.co.il")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    me = c.get("/api/auth/me").json()["user"]
+    assert me["role"] == "viewer" and me["username"] != "boss@factory.co.il" and not me["password"]
+    c.post("/api/auth/logout")
+    # even a verified e-mail does not link to an account that signs in with a password
+    r, _ = idp.sign_in(c, sub="boss-sub", email="boss@factory.co.il", email_verified=True)
+    assert "סיסמה" in _error(r) and c.get("/api/auth/me").json()["user"] is None
+    assert st.find_user("boss@factory.co.il")["oidc_sub"] is None
+
+
+@pytest.mark.parametrize("host", ["x?", "x#", "partaudit.factory.local:8765?a=/", "a b", "evil.com/api", ""])
+def test_a_malformed_host_header_is_refused(team, host):
+    """Some framework versions rebuild the request's address from the Host header; a '?' in it used to make that
+    address's path disagree with the routed one. Such a Host is refused before anything else."""
+    c, st = team
+    r = c.post("/api/users", json={"username": "mallory", "role": "admin", "password": "Mallory-Passw0rd!"},
+               headers={"host": host})
+    assert r.status_code == 400 and st.find_user("mallory") is None
+
+
+def test_path_variants_do_not_skip_the_sign_in(team):
+    c, st = team
+    for path in ("/api/users", "/api/%75sers", "/api/users/", "/api/settings", "/api/auth/me/../../users"):
+        assert c.get(path).status_code in (401, 404, 307), path
+    assert c.get("//api/users").status_code == 404 and c.get("/API/users").status_code == 404

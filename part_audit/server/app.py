@@ -55,6 +55,11 @@ def _host_port(host_header: str) -> int | None:
     return int(rest[1:]) if rest.startswith(":") and rest[1:].isdigit() else None
 
 
+# a Host header is a name or an address with an optional port - nothing else (a '?' or '#' in it could make the
+# address a framework rebuilds from it disagree with the path the request is routed by)
+HOST_OK = re.compile(r"(?:[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,252})|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?")
+
+
 def _same_origin(origin: str, host_header: str, scheme: str = "http") -> bool:
     """The page that sent the request was served by this app (same scheme, host name and port)."""
     try:
@@ -146,8 +151,11 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         (blocks DNS rebinding). Team server: every request needs a signed-in user whose role allows it, and the demo
         systems answer only the server itself. Both: a request that changes something must come from the app's own
         page (no other site as its origin)."""
-        host, path = request.headers.get("host", ""), request.url.path
+        # the path the router uses, never one rebuilt from the Host header (request.url)
+        host, path = request.headers.get("host", ""), request.scope.get("path", "")
         request.state.user = None
+        if not HOST_OK.fullmatch(host):
+            return JSONResponse({"error": "כתובת לא תקינה"}, status_code=400)
         if not team and _host_name(host) not in LOOPBACK_NAMES:
             return JSONResponse({"error": "גישה מותרת רק מהמחשב הזה (127.0.0.1)"}, status_code=403)
         if team and path.startswith("/sim/") and client_ip(request) not in LOOPBACK_IPS:
@@ -451,19 +459,24 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         return resp
 
     def company_user(ident: dict, oc: dict) -> dict:
-        """The account of a company sign-in: linked before, or the account with that e-mail, or a new one."""
+        """The account of a company sign-in: the one linked before; else an account an admin added for company
+        sign-in (no password) with the same e-mail - only when the provider vouches for that e-mail; else a new one.
+        An account with a password is never taken over by a company sign-in."""
         u = store.find_user_oidc(ident["sub"])
-        if not u and ident["email"]:
-            u = store.find_user(ident["email"]) or next((x for x in store.list_users()
-                                                          if (x.get("email") or "").lower() == ident["email"]), None)
-            if u and u.get("oidc_sub") and u["oidc_sub"] != ident["sub"]:
+        if not u and ident["email"] and ident["email_trusted"]:
+            cand = store.find_user(ident["email"]) or next((x for x in store.list_users()
+                                                             if (x.get("email") or "").lower() == ident["email"]), None)
+            if cand and cand.get("oidc_sub"):
                 raise oidc.OIDCError("המשתמש עם המייל הזה כבר מקושר לחשבון חברה אחר")
-            if u:
-                u = store.update_user(u["id"], oidc_sub=ident["sub"], email=ident["email"])
+            if cand and cand.get("pw_hash"):
+                raise oidc.OIDCError("קיים משתמש עם המייל הזה שנכנס עם סיסמה. מנהל המערכת יכול להעביר אותו לכניסה "
+                                     "עם חשבון החברה (הגדרות > צוות)")
+            if cand:
+                u = store.update_user(cand["id"], oidc_sub=ident["sub"], email=ident["email"])
         if not u:
             if not oc["auto_create"]:
                 raise oidc.OIDCError("החשבון שלך עוד לא נוסף ל-PartAudit – בקשו ממנהל המערכת להוסיף אתכם")
-            base = (ident["email"] or ident["sub"].split("|", 1)[-1])[:100]
+            base = (ident["email"] or ident["login"] or ident["sub"].split("|", 1)[-1])[:100]
             name, n = base, 1
             while store.find_user(name):
                 n += 1
