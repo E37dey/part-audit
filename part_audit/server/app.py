@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import threading
@@ -21,11 +20,13 @@ from ..demo import DEMO_DIR, demo_sources
 
 from ..decisions import chosen_target, effective_mapping, group_impact, group_targets, row_decision
 from ..names import pn_key
-from ..project import ProjectSettings, audit_snapshot, collect
-from .store import Store
+from ..project import ProjectSettings
+from ..runner import DEFAULT_SETTINGS, run_scan, settings_of
+from .store import MASK, Store
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
+RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
 
 
 def _host_name(host_header: str) -> str:
@@ -56,8 +57,6 @@ def _same_origin(origin: str, host_header: str) -> bool:
     except ValueError:
         return False
     return u.scheme == "http" and u.netloc.lower() == host_header.strip().lower()
-DEFAULT_SETTINGS = {"user_name": "", "mass_tolerance": 0.10, "workers": max(1, (os.cpu_count() or 2) - 1),
-                    "cost_per_pn_year": None, "currency": "ILS", "thresholds": {}}
 
 
 class Jobs:
@@ -122,7 +121,7 @@ def _rebase_demo_sources(store: "Store", base_url: str) -> None:
 
 
 def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR, demo: bool = True,
-               base_url: str = "http://127.0.0.1:8765") -> FastAPI:
+               base_url: str = "http://127.0.0.1:8765", scheduler: bool = False) -> FastAPI:
     store = Store(workspace)
     jobs = Jobs()
     results: dict[str, dict] = {}
@@ -166,7 +165,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
 
     # ------------------------------------------------------------------ helpers
     def settings() -> dict:
-        return {**DEFAULT_SETTINGS, **store.get_settings()}
+        return settings_of(store)
 
     results_lock = threading.Lock()
 
@@ -174,6 +173,8 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         rid = rid if rid and rid != "latest" else store.latest_run()
         if not rid:
             raise HTTPException(404, "עדיין לא בוצעה סריקה")
+        if not RUN_ID.fullmatch(rid):
+            raise HTTPException(404, "הסריקה לא נמצאה")
         with results_lock:
             res = results.get(rid)
             if res is None:
@@ -234,13 +235,51 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
 
     @app.get("/api/settings")
     def get_settings():
-        return settings()
+        import datetime as dt
+
+        from ..notify import SECRET
+        from ..schedule import describe, next_slot
+        out = settings()
+        out["email"] = {**out["email"], "password": MASK if store.get_secret(SECRET) else ""}
+        sc = out["schedule"]
+        out["schedule_info"] = {"text": describe(sc), "last": store.get_settings().get("schedule_last"),
+                                "next": next_slot(sc, dt.datetime.now()).isoformat(timespec="minutes")
+                                if sc["enabled"] else None, "running_here": scheduler}
+        return out
 
     @app.put("/api/settings")
     async def put_settings(request: Request):
+        from ..notify import DEFAULT_EMAIL, SECRET
+        from ..schedule import DEFAULT_SCHEDULE
         body = await request.json()
-        allowed = {k: v for k, v in body.items() if k in DEFAULT_SETTINGS}
-        return {**DEFAULT_SETTINGS, **store.set_settings(allowed)}
+        old = settings()
+        allowed = {k: v for k, v in body.items() if k in DEFAULT_SETTINGS and k not in ("schedule", "email")}
+        if isinstance(body.get("schedule"), dict):
+            sc = {**old["schedule"], **{k: v for k, v in body["schedule"].items() if k in DEFAULT_SCHEDULE and k != "since"}}
+            if sc["frequency"] not in ("daily", "weekly") or not re.fullmatch(r"\d{1,2}:\d{2}", str(sc["time"])):
+                raise HTTPException(400, "תזמון לא תקין")
+            sc["weekday"] = int(sc["weekday"]) % 7
+            sc["enabled"] = bool(sc["enabled"])
+            if sc["enabled"] and not old["schedule"]["enabled"]:
+                sc["since"] = time.strftime("%Y-%m-%dT%H:%M:%S")     # no catch-up for times before it was turned on
+            allowed["schedule"] = sc
+        if isinstance(body.get("email"), dict):
+            em = {**old["email"], **{k: v for k, v in body["email"].items() if k in DEFAULT_EMAIL}}
+            if em["security"] not in ("starttls", "ssl", "none") or em["on"] not in ("changes", "always"):
+                raise HTTPException(400, "הגדרות דואר לא תקינות")
+            try:
+                em["port"] = int(em["port"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, "פורט לא תקין")
+            em["enabled"], em["after_manual"] = bool(em["enabled"]), bool(em["after_manual"])
+            pw = body["email"].get("password")
+            if pw and pw != MASK:
+                store.set_secret(SECRET, pw)
+            elif em["host"] != old["email"]["host"] or em["user"] != old["email"]["user"]:
+                store.set_secret(SECRET, "")      # a password is never sent to a server it was not entered for
+            allowed["email"] = em
+        store.set_settings(allowed)
+        return get_settings()
 
     # ------------------------------------------------------------------ sources
     @app.get("/api/sources")
@@ -345,47 +384,28 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         return store.list_sources()
 
     # ------------------------------------------------------------------ scan
+    def clear_results():
+        with results_lock:
+            results.clear()
+
+    def start_scan_job(trigger: str = "manual") -> str:
+        def work(progress, should_stop):
+            return run_scan(store, progress, should_stop, trigger=trigger, app_url=app.state.base_url,
+                            on_done=clear_results)
+        return jobs.start("scan", work)
+
     @app.post("/api/scan")
     def scan():
         if jobs.running("scan"):
             raise HTTPException(409, "סריקה כבר רצה")
-        cfg = settings()
+        return {"job_id": start_scan_job("manual")}
 
-        def work(progress, should_stop):
-            t0 = time.time()
-            rid = store.new_run()
-            try:
-                srcs = [s for s in store.list_sources(with_secrets=True) if s["enabled"]]
-                if not srcs:
-                    raise RuntimeError("אין מקורות נתונים פעילים")
-                snap = collect(srcs, store.ws / "cache" / "connectors", progress=progress, should_stop=should_stop)
-                if should_stop():   # a stopped scan is incomplete: it must never become the latest result
-                    store.finish_run(rid, "cancelled", None, time.time() - t0)
-                    return None
-                snap.save(store.run_dir(rid) / "snapshot.json")
-                (store.run_dir(rid) / "step_paths.json").write_text(json.dumps(
-                    {r.uid: r.step_path for r in snap.records if r.step_path}), encoding="utf-8")
-                st = ProjectSettings.from_dict({"mass_tolerance": cfg["mass_tolerance"], "workers": int(cfg["workers"]),
-                                                "cost_per_pn_year": cfg["cost_per_pn_year"],
-                                                "currency": cfg["currency"], "thresholds": cfg.get("thresholds") or {}})
-                files: dict = {}
-                res = audit_snapshot(snap, st, store.ws / "cache", progress=progress, files_out=files)
-                if should_stop():
-                    store.finish_run(rid, "cancelled", None, time.time() - t0)
-                    return None
-                # the STEP records read for this scan: a pre-release check compares with them without reading again
-                (store.run_dir(rid) / "files.json").write_text(json.dumps(files, ensure_ascii=False), encoding="utf-8")
-                res["run_id"] = rid
-                res["demo"] = any(s.get("simulated") for s in srcs)
-                (store.run_dir(rid) / "result.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
-                store.finish_run(rid, "done", res["summary"], time.time() - t0)
-                with results_lock:
-                    results.clear()
-                return {"run_id": rid, "summary": res["summary"]}
-            except Exception as exc:
-                store.finish_run(rid, "error", None, time.time() - t0, f"{type(exc).__name__}: {exc}")
-                raise
-        return {"job_id": jobs.start("scan", work)}
+    if scheduler:      # the app started by a person (not tests or the export tool) runs the scan schedule
+        from ..schedule import Scheduler
+        app.state.scheduler = Scheduler(
+            get_schedule=lambda: settings()["schedule"], get_last=lambda: store.get_settings().get("schedule_last"),
+            set_last=lambda t: store.set_settings({"schedule_last": t}),
+            start_scan=lambda: not jobs.running("scan") and bool(start_scan_job("schedule"))).start()
 
     @app.get("/api/jobs/{jid}")
     def job(jid: str):
@@ -403,6 +423,52 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     @app.get("/api/runs")
     def runs():
         return store.list_runs()
+
+    # ------------------------------------------------------------------ changes since the scan before
+    changes_cache: dict[tuple, dict] = {}
+
+    @app.get("/api/runs/{rid}/changes")
+    def run_changes(rid: str, base: str = ""):
+        """What changed between a scan and the one before it (or the scan named in 'base')."""
+        from ..changes import compare_runs
+        from ..runner import failed_sources, load_result as read_result
+        rid = rid if rid != "latest" else (store.latest_run() or "")
+        if not RUN_ID.fullmatch(rid) or (base and not RUN_ID.fullmatch(base)):
+            raise HTTPException(404, "הסריקה לא נמצאה")
+        prev = base or store.previous_run(rid)
+        if not prev:
+            return {"available": False, "reason": "first", "to": {"run_id": rid}}
+        f = store.run_dir(rid) / "changes.json"
+        if not base and f.exists():
+            ch = json.loads(f.read_text(encoding="utf-8"))
+        else:
+            key = (prev, rid)
+            if key not in changes_cache:
+                old, new = read_result(store, prev), read_result(store, rid)
+                if old is None or new is None:
+                    raise HTTPException(404, "תוצאות הסריקה לא נמצאו")
+                ch = compare_runs(old, new)
+                ch["failed_sources"] = failed_sources(new)
+                with cache_lock:
+                    if len(changes_cache) > 8:
+                        changes_cache.clear()
+                    changes_cache[key] = ch
+            ch = changes_cache[key]
+        nf = store.run_dir(rid) / "notify.json"
+        return {"available": True, **ch, "notify": json.loads(nf.read_text(encoding="utf-8")) if nf.exists() else None}
+
+    @app.post("/api/notify/test")
+    def notify_test():
+        """A short test message through the configured mail server."""
+        from ..notify import SECRET, build_message, recipients, send
+        em = settings()["email"]
+        text = "זו הודעת בדיקה מ-PartAudit. אם קיבלתם אותה, ההתראות אחרי סריקה מתוזמנת יגיעו לכתובת הזו."
+        msg = build_message(em, "PartAudit – הודעת בדיקה", text, f'<div dir="rtl" style="font-family:Arial">{text}</div>')
+        try:
+            send(em, store.get_secret(SECRET), msg)
+        except Exception as exc:
+            raise HTTPException(502, f"השליחה נכשלה: {type(exc).__name__}: {exc}")
+        return {"ok": True, "to": recipients(em)}
 
     # ------------------------------------------------------------------ results
     @app.get("/api/runs/{rid}/summary")
@@ -437,7 +503,18 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                                                   if g.get("currency", summ["currency"]) == summ["currency"]), 2)
         summ["bom_lines_to_update"] = sum(g["bom_lines_to_update"] for g in final)
         top = sorted(final, key=lambda g: (-(g["redundant_stock_value"] or 0), -len(g["members"])))[:10]
+        ch_f = store.run_dir(rid) / "changes.json"
+        changes = None
+        if ch_f.exists():
+            ch = json.loads(ch_f.read_text(encoding="utf-8"))
+            fi = ch["findings"]
+            changes = {"from": ch["from"], "headline": ch["headline"], "alert": ch["alert"],
+                       "new_groups": len(ch["groups"]["new"]), "grown_groups": len(ch["groups"]["grown"]),
+                       "resolved_groups": len(ch["groups"]["resolved"]),
+                       "new_findings": fi["quality"]["n_new"] + fi["erp_issues"]["n_new"],
+                       "resolved_findings": fi["quality"]["n_resolved"] + fi["erp_issues"]["n_resolved"]}
         return {"run_id": rid, "created": res["created"], "demo": res.get("demo", False), "summary": summ,
+                "changes": changes, "trigger": res.get("trigger", "manual"),
                 "timings": res["timings"], "sources": res["sources"], "decisions": {"pending_groups": pending,
                                                                                      "approved_groups": approved},
                 "issues_by_type": dict(sorted(by_type.items(), key=lambda kv: -kv[1])), "by_source": by_source,

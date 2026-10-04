@@ -479,6 +479,14 @@ input[type="checkbox"] { accent-color: var(--dye); width: 15px; height: 15px; }
 .v-note.warn { border-inline-start-color: var(--warn); }
 .v-note.ok { border-inline-start-color: var(--ok); }
 .v-note.info { border-inline-start-color: var(--info); }
+.verdict.slim { grid-template-columns: minmax(0, 1fr); padding: 16px 22px; }
+.verdict.slim .v-body h2 { font-size: 1.3rem; }
+.d-bad { color: var(--bad); font-family: var(--mono); }
+.d-ok { color: var(--ok); font-family: var(--mono); }
+.since { display: flex; gap: 10px 18px; align-items: center; flex-wrap: wrap; padding: 12px 18px; border-radius: var(--r-frame);
+  border: 1px solid var(--line); background: var(--surface); font-size: var(--fs-sm); color: var(--ink-2); }
+.since b { color: var(--ink); font-weight: 600; }
+.since .spacer { flex: 1; }
 @media (max-width: 820px) {
   .intake { grid-template-columns: minmax(0, 1fr); }
   .verdict { grid-template-columns: minmax(0, 1fr); padding: 18px; }

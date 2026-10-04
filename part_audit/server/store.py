@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     note TEXT, user TEXT, run_id TEXT, created TEXT);
 CREATE INDEX IF NOT EXISTS ix_decisions_target ON decisions(target_type, target_id);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS secrets (key TEXT PRIMARY KEY, value TEXT);
 """
 SECRET_FIELDS = ("password", "app_key", "token")
 MASK = "••••••"
@@ -50,6 +51,9 @@ class Store:
         self._lock = threading.RLock()
         with self._conn() as c:
             c.executescript(SCHEMA)
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(runs)")}
+            if "trigger" not in cols:          # workspaces from before scheduled scans
+                c.execute("ALTER TABLE runs ADD COLUMN trigger TEXT DEFAULT 'manual'")
 
     def _conn(self):
         c = sqlite3.connect(self.db_path, timeout=30)
@@ -87,6 +91,38 @@ class Store:
                 kr = kr or self._keyring()
                 out[k] = (kr.get_password("part-audit", f"{sid}:{k}") if kr else "") or ""
         return out
+
+    def set_secret(self, name: str, value: str) -> None:
+        """An app-level credential (the mail server password): the OS credential store when there is one,
+        otherwise a table of this computer's database that the API never returns."""
+        kr = self._keyring()
+        with self._lock, self._conn() as c:
+            c.execute("DELETE FROM secrets WHERE key=?", (name,))
+            if not value:
+                if kr is not None:
+                    try:
+                        kr.delete_password("part-audit", f"app:{name}")
+                    except Exception:
+                        pass
+                return
+            if kr is not None:
+                try:
+                    kr.set_password("part-audit", f"app:{name}", value)
+                    c.execute("INSERT INTO secrets(key, value) VALUES(?, '__keyring__')", (name,))
+                    return
+                except Exception:
+                    pass
+            c.execute("INSERT INTO secrets(key, value) VALUES(?, ?)", (name, value))
+
+    def get_secret(self, name: str) -> str:
+        with self._conn() as c:
+            r = c.execute("SELECT value FROM secrets WHERE key=?", (name,)).fetchone()
+        if not r:
+            return ""
+        if r["value"] == "__keyring__":
+            kr = self._keyring()
+            return (kr.get_password("part-audit", f"app:{name}") if kr else "") or ""
+        return r["value"]
 
     # ------------------------------------------------------------------ sources
     def list_sources(self, with_secrets: bool = False) -> list[dict]:
@@ -141,12 +177,13 @@ class Store:
             c.execute("UPDATE sources SET last_test=? WHERE id=?", (json.dumps(dict(result, at=now()), ensure_ascii=False), sid))
 
     # ------------------------------------------------------------------ runs
-    def new_run(self) -> str:
+    def new_run(self, trigger: str = "manual") -> str:
+        """trigger: manual (the app's button) | schedule (the app's schedule) | cli (a scheduled task of the OS)."""
         rid = dt.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
         (self.ws / "runs" / rid).mkdir(parents=True, exist_ok=True)
         with self._lock, self._conn() as c:
-            c.execute("INSERT INTO runs(id, created, status, path) VALUES(?,?,?,?)",
-                      (rid, now(), "running", str(self.ws / "runs" / rid)))
+            c.execute("INSERT INTO runs(id, created, status, path, trigger) VALUES(?,?,?,?,?)",
+                      (rid, now(), "running", str(self.ws / "runs" / rid), trigger))
         return rid
 
     def finish_run(self, rid: str, status: str, summary: dict | None = None, duration: float = 0.0,
@@ -157,13 +194,25 @@ class Store:
 
     def list_runs(self) -> list[dict]:
         with self._conn() as c:
-            rows = c.execute("SELECT * FROM runs ORDER BY created DESC").fetchall()
+            rows = c.execute("SELECT * FROM runs ORDER BY created DESC, rowid DESC").fetchall()
         return [{"id": r["id"], "created": r["created"], "status": r["status"], "duration_s": r["duration_s"],
-                 "error": r["error"], "summary": json.loads(r["summary"]) if r["summary"] else None} for r in rows]
+                 "error": r["error"], "trigger": r["trigger"] or "manual",
+                 "summary": json.loads(r["summary"]) if r["summary"] else None} for r in rows]
+
+    def previous_run(self, rid: str) -> str | None:
+        """The finished scan before this one."""
+        with self._conn() as c:
+            me = c.execute("SELECT created, rowid FROM runs WHERE id=?", (rid,)).fetchone()
+            if not me:
+                return None
+            r = c.execute("SELECT id FROM runs WHERE status='done' AND (created<? OR (created=? AND rowid<?)) "
+                          "ORDER BY created DESC, rowid DESC LIMIT 1", (me["created"], me["created"], me["rowid"])).fetchone()
+        return r["id"] if r else None
 
     def latest_run(self) -> str | None:
         with self._conn() as c:
-            r = c.execute("SELECT id FROM runs WHERE status='done' ORDER BY created DESC LIMIT 1").fetchone()
+            # two scans in the same second keep the order they were started in
+            r = c.execute("SELECT id FROM runs WHERE status='done' ORDER BY created DESC, rowid DESC LIMIT 1").fetchone()
         return r["id"] if r else None
 
     def run_dir(self, rid: str) -> Path:

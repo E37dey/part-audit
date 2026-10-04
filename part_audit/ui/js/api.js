@@ -194,6 +194,15 @@ async function staticGet(path, params = {}) {
     if (!x) throw new Error("החלק לא נמצא");
     return x;
   }
+  if ((m = p.match(/^runs\/[^/]+\/changes$/))) {
+    // the latest scan against an earlier one (exported for every earlier scan); the default is the one just before
+    const all = await staticJson("changes.json");
+    const runs = (await staticJson("runs.json")).filter((r) => r.status === "done");
+    if (runs.length < 2) return { available: false, reason: "first" };
+    const x = all[params.base || runs[1].id];
+    if (!x) throw new Error("ההשוואה לסריקה הזו לא נכללה בגרסה המקוונת");
+    return x;
+  }
   // pre-release checks: the examples that were run in the app on the demo's sample files
   if (p === "checks") return staticJson("checks.json");
   if (p === "checks/samples") return [];

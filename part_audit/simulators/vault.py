@@ -49,11 +49,12 @@ class _Data:
             self._walk(t, fid, home)
         self.fvs: list[dict] = []
         self.by_id: dict[str, dict] = {}
-        nid = 1000
         for r in recs:
             folder = home.get(r["rid"]) or ("3" if r["family"] in FASTENER_FAMS or r["family"] == "bearing"
                                             else ("4" if r["make_buy"] == "buy" else "6"))
-            nid += 3
+            # ids follow the record, as a real vault's database ids do: a record added or removed elsewhere in the
+            # vault never renumbers the others (ids of one record: nid-2 .. nid+1)
+            nid = 4 * int(r["native_id"])
             fv = self._fv(r, str(nid), str(nid - 1), r["native_file"], folder, "Assembly" if r["kind"] == "assembly"
                           else "Part")
             self.fvs.append(fv)
@@ -68,8 +69,8 @@ class _Data:
         self.native_by_rid = {fv["_rid"]: fv for fv in self.fvs if not fv.get("_step")}
         # item master: one item per native record
         self.items: list[dict] = []
-        for i, r in enumerate(recs):
-            iid = str(5000 + 2 * i)
+        for r in recs:
+            iid = str(100000 + 2 * int(r["native_id"]))
             st = r["state"]
             self.items.append({"name": r["pn"], "id": iid, "revision": r["revision"] if r["revision"] != "-" else "",
                                "lastModifiedUserName": r["author"], "lastModifiedDate": r["modified"] + "T08:00:00Z",

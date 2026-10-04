@@ -155,6 +155,10 @@ def main() -> None:
     if real:
         raise SystemExit("this workspace reads real systems (" + ", ".join(real) + "): the online copy is for the demo only")
     status.update({"latest_run": "latest", "workspace": "", "running": None, "static": True})
+    # the online copy never shows how mail or the schedule were set up on the computer that made it
+    from part_audit.notify import DEFAULT_EMAIL
+    from part_audit.schedule import DEFAULT_SCHEDULE
+    status["settings"].update({"email": DEFAULT_EMAIL, "schedule": DEFAULT_SCHEDULE})
     dump(data / "status.json", status)
     dump(data / "connectors.json", get("/api/connectors"))
     # the online copy shows which systems were read, not how to reach them
@@ -168,6 +172,12 @@ def main() -> None:
         if r.status_code == 200:
             disc[src["id"]] = r.json()
     dump(data / "discovery.json", disc)
+    # what changed: the latest scan against every scan before it (the page lets the viewer pick one)
+    done = [r for r in get("/api/runs") if r["status"] == "done"]
+    changes = {}
+    for r in done[1:]:
+        changes[r["id"]] = get(f"/api/runs/{done[0]['id']}/changes", base=r["id"])
+    dump(data / "changes.json", changes)
     summary = get("/api/runs/latest/summary")
     summary["sources"] = [{k: v for k, v in x.items() if k != "url"} for x in summary["sources"]]   # no addresses
     dump(data / "summary.json", summary)

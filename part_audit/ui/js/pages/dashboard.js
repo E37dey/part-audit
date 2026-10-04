@@ -1,5 +1,5 @@
 import { get } from "../api.js";
-import { esc, n0, money, pnChip, sysBadge, decisionPill, datetime } from "../util.js";
+import { esc, n0, money, pnChip, sysBadge, decisionPill, date, datetime } from "../util.js";
 import { bars } from "../ui.js";
 
 export async function render({ el, setTitle, state }) {
@@ -9,7 +9,11 @@ export async function render({ el, setTitle, state }) {
   const cur = s.currency || "ILS";
   const kindOf = Object.fromEntries(d.sources.map((x) => [x.name, x.kind]));
   const share = (a, b) => (b ? Math.round((100 * a) / b) : 0);
+  const ch = d.changes;
   el.innerHTML = `
+  ${ch ? `<a class="since" href="#/changes" style="text-decoration:none">
+    <span class="pill ${ch.alert ? "warn" : "ok"}">מאז הסריקה של ${date(ch.from.created)}</span>
+    <b>${esc(ch.headline)}</b><span class="spacer"></span><span class="small">לפירוט</span></a>` : ""}
   <section class="readout" aria-label="הממצאים העיקריים">
     ${cell("קבוצות כפילות", n0(s.groups), `${n0(s.parts_in_groups)} רשומות, ${n0(s.groups_cross_source)} מהן חוצות מערכות`, "#/groups")}
     ${cell("מק\"טים שאפשר לבטל", n0(s.redundant_pns), "אחרי אישור נשאר מק\"ט אחד בכל קבוצה", "#/mapping")}
@@ -19,7 +23,7 @@ export async function render({ el, setTitle, state }) {
   <section class="readout sub" aria-label="ממצאים נוספים">
     ${cell("חלקים שנסרקו", n0(s.parts), `ועוד ${n0(s.assemblies)} מכלולים מ-${n0(s.sources)} מקורות`, "#/parts")}
     ${cell("כמעט זהים", n0(s.near_pairs), "זוגות שאולי אפשר לתקנן לחלק אחד", "#/near")}
-    ${cell("בעיות איכות", n0(s.quality_high + s.quality_medium), `${n0(s.quality_high)} בחומרה גבוהה`, "#/quality")}
+    ${cell("בעיות איכות", n0(s.quality_issues), "משקל, חומר, מק\"ט, יחידות, עץ מוצר", "#/quality")}
     ${cell("פערים בין PDM ל-ERP", n0(s.erp_issues), "חסרים, תיאור, חומר, סטטוס, עץ מוצר", "#/erp")}
   </section>
   <section class="panel"><div class="panel-h"><h2>כיסוי הנתונים</h2><span class="sub">על מה מבוססות ההשוואות</span></div>
@@ -58,7 +62,7 @@ export async function render({ el, setTitle, state }) {
   <section class="panel"><div class="panel-h"><h2>מה עושים עכשיו</h2></div><div class="next-steps">
     ${next("1", "לאשר כפילויות", `${n0(d.decisions.pending_groups)} קבוצות ממתינות. כל קבוצה מציגה את החלקים זה לצד זה בתלת-ממד, עם מלאי ושימושים.`, "#/groups")}
     ${next("2", "לבדוק חלקים כמעט זהים", `${n0(s.near_pairs)} זוגות עם הבדל קטן. מפת צבעים מראה בדיוק איפה הם שונים.`, "#/near")}
-    ${next("3", "לתקן את הנתונים", `${n0(s.quality_high)} בעיות בחומרה גבוהה ו-${n0(s.erp_issues)} פערים מול ה-ERP.`, "#/quality")}
+    ${next("3", "לתקן את הנתונים", `${n0(s.quality_issues)} בעיות איכות ו-${n0(s.erp_issues)} פערים מול ה-ERP.`, "#/quality")}
   </div></section>`;
   el.querySelectorAll("tr[data-h]").forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.h)));
 }

@@ -9,11 +9,11 @@ const PAGES = {
   near: () => import("./pages/near.js"), pair: () => import("./pages/pair.js"), names: () => import("./pages/findings.js"),
   quality: () => import("./pages/findings.js"), erp: () => import("./pages/findings.js"), mapping: () => import("./pages/mapping.js"),
   parts: () => import("./pages/parts.js"), part: () => import("./pages/part.js"), settings: () => import("./pages/settings.js"),
-  guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"),
+  guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"), changes: () => import("./pages/changes.js"),
 };
 // the navigation follows the work: connect the systems, go through the findings, decide
 const NAV = [
-  [null, [["dashboard", "לוח בקרה", ICON.dash]]],
+  [null, [["dashboard", "לוח בקרה", ICON.dash], ["changes", "מה השתנה", ICON.delta, "changes"]]],
   ["1", "חיבור", [["sources", "מקורות נתונים", ICON.plug]]],
   ["2", "ממצאים", [["groups", "כפילויות", ICON.copy, "groups"], ["near", "כמעט זהים", ICON.near, "near_pairs"],
     ["names", "שמות ומק\"טים", ICON.tag, "name_findings"], ["quality", "איכות נתונים", ICON.check, "quality_issues"],
@@ -79,12 +79,14 @@ export async function refreshStatus() {
     try { state.summary = await get(`/api/runs/${state.status.latest_run}/summary`); } catch { state.summary = null; }
   }
   const s = state.summary?.summary;
+  const ch = state.summary?.changes;
   const counts = s ? { groups: s.groups, near_pairs: s.near_pairs, name_findings: s.name_findings,
-    quality_issues: s.quality_issues, erp_issues: s.erp_issues, pending: state.summary.decisions.pending_groups } : {};
+    quality_issues: s.quality_issues, erp_issues: s.erp_issues, pending: state.summary.decisions.pending_groups,
+    changes: ch && ch.new_groups + ch.grown_groups ? ch.new_groups + ch.grown_groups : null } : {};
   document.querySelectorAll("#nav .count").forEach((c) => {
     const v = counts[c.dataset.c];
     c.textContent = v == null ? "" : n0(v);
-    c.classList.toggle("hot", c.dataset.c === "pending" && v > 0);
+    c.classList.toggle("hot", (c.dataset.c === "pending" || c.dataset.c === "changes") && v > 0);
   });
   document.getElementById("runinfo").innerHTML = state.summary ? `<span class="live" aria-hidden="true"></span>סריקה אחרונה: ${datetime(state.summary.created)}` : "";
   document.getElementById("ver").textContent = `גרסה ${state.status.version}` + (isStatic ? ", הדגמה מקוונת" : "");
@@ -152,7 +154,7 @@ export function setTitle(title, crumbs = "") {
 export function go(hash) { location.hash = hash; }
 
 async function route() {
-  const raw = decodeURIComponent((location.hash || "#/").slice(2));
+  const raw = decodeURIComponent((location.hash || "#/").slice(2)).split("?")[0];   // ?… are a page's own options
   let [page, ...rest] = raw.split("/");
   const param = rest.join("/");
   if (!page) page = state.summary ? "dashboard" : (state.status?.sources ? "sources" : "welcome");

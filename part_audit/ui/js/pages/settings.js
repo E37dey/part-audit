@@ -5,11 +5,14 @@ import { toast } from "../ui.js";
 
 const TYPE_HE = { group: "קבוצת כפילות", pair: "זוג", mapping: "שורת מיפוי", issue: "ממצא" };
 const ISSUE = { approve: "לתקן", reject: "לא בעיה", review: "לבדיקה", ignore: "להתעלם" };
+const DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
 export async function render({ el, setTitle, refreshStatus, state }) {
   setTitle("הגדרות");
   const [s, decisions] = await Promise.all([get("/api/settings"), get("/api/decisions")]);
   const th = s.thresholds || {};
+  const sc = s.schedule || {}, em = s.email || {};
+  s.schedule_info = s.schedule_info || {};
   el.innerHTML = `
     <section class="panel"><div class="panel-h"><h2>כללי</h2></div><div class="panel-b">
       <div class="form">
@@ -37,6 +40,43 @@ export async function render({ el, setTitle, refreshStatus, state }) {
       <div><button class="btn small" id="reset">חזרה לברירות המחדל</button></div>
     </div></section>
 
+    <section class="panel" id="schedule"><div class="panel-h"><h2>סריקה אוטומטית</h2><span class="sub">${sc.enabled ? esc(s.schedule_info.text) : "כבויה"}</span></div>
+      <div class="panel-b stack">
+        <label class="check"><input type="checkbox" id="sc-on" ${sc.enabled ? "checked" : ""}> לסרוק את כל המקורות אוטומטית</label>
+        <div class="form">
+          <div class="field"><label for="sc-freq">תדירות</label><select id="sc-freq"><option value="weekly" ${sc.frequency === "weekly" ? "selected" : ""}>פעם בשבוע</option>
+            <option value="daily" ${sc.frequency === "daily" ? "selected" : ""}>כל יום</option></select></div>
+          <div class="field" id="sc-day-f"><label for="sc-day">יום</label><select id="sc-day">${DAYS.map((d, i) => `<option value="${i}" ${+sc.weekday === i ? "selected" : ""}>${d}</option>`).join("")}</select></div>
+          <div class="field"><label for="sc-time">שעה</label><input id="sc-time" type="time" value="${esc(sc.time)}" dir="ltr"></div>
+        </div>
+        <p class="small muted">הסריקה רצה כשהתוכנה פתוחה, ומושווית לסריקה שלפניה במסך "מה השתנה". אם המחשב היה כבוי בשעה שנקבעה, הסריקה תרוץ פעם אחת כשהתוכנה תיפתח.
+          ${sc.enabled && s.schedule_info.next ? `הסריקה הבאה: <b>${datetime(s.schedule_info.next)}</b>.` : ""}
+          ${s.schedule_info.last ? `הסריקה המתוזמנת האחרונה התחילה ב-${datetime(s.schedule_info.last)}.` : ""}
+          לסריקה גם כשהתוכנה סגורה אפשר להגדיר משימה מתוזמנת של Windows (<a href="#/guide">במדריך</a>).</p>
+      </div></section>
+
+    <section class="panel" id="email"><div class="panel-h"><h2>התראה במייל</h2><span class="sub">${em.enabled ? "פעילה" : "כבויה (ברירת מחדל)"}</span></div>
+      <div class="panel-b stack">
+        <label class="check"><input type="checkbox" id="em-on" ${em.enabled ? "checked" : ""}> לשלוח מייל עם מה שהשתנה אחרי סריקה מתוזמנת</label>
+        <div class="form">
+          <div class="field"><label for="em-host">שרת דואר (SMTP)</label><input id="em-host" dir="ltr" value="${esc(em.host)}" placeholder="smtp.company.co.il"></div>
+          <div class="field"><label for="em-port">פורט</label><input id="em-port" type="number" min="1" max="65535" dir="ltr" value="${esc(em.port)}"></div>
+          <div class="field"><label for="em-sec">אבטחה</label><select id="em-sec">
+            ${[["starttls", "STARTTLS (בדרך כלל פורט 587)"], ["ssl", "SSL (בדרך כלל פורט 465)"], ["none", "ללא הצפנה (שרת פנימי בלבד)"]].map(([v, l]) => `<option value="${v}" ${em.security === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+          <div class="field"><label for="em-user">משתמש</label><input id="em-user" dir="ltr" value="${esc(em.user)}" autocomplete="off"></div>
+          <div class="field"><label for="em-pw">סיסמה</label><input id="em-pw" type="password" dir="ltr" value="${esc(em.password)}" autocomplete="new-password">
+            <span class="help">נשמרת במנהל האישורים של מערכת ההפעלה. שינוי השרת מוחק אותה.</span></div>
+          <div class="field"><label for="em-from">כתובת השולח</label><input id="em-from" dir="ltr" value="${esc(em.sender)}" placeholder="partaudit@company.co.il"></div>
+          <div class="field full"><label for="em-to">נמענים</label><input id="em-to" dir="ltr" value="${esc(em.to)}" placeholder="name@company.co.il, other@company.co.il"></div>
+          <div class="field"><label for="em-when">מתי לשלוח</label><select id="em-when">
+            <option value="changes" ${em.on === "changes" ? "selected" : ""}>רק כשיש כפילות או ממצא חדש</option>
+            <option value="always" ${em.on === "always" ? "selected" : ""}>אחרי כל סריקה מתוזמנת</option></select></div>
+          <label class="check" style="align-self:end"><input type="checkbox" id="em-manual" ${em.after_manual ? "checked" : ""}> גם אחרי סריקה ידנית</label>
+        </div>
+        <div class="callout small">המייל יוצא רק דרך שרת הדואר שהגדרתם כאן, ומכיל את המק"טים והשמות של הכפילויות והממצאים החדשים. שום דבר אחר לא יוצא מהמחשב.</div>
+        <div><button class="btn small" id="em-test">שמור ושלח מייל בדיקה</button></div>
+      </div></section>
+
     <div class="row"><button class="btn primary" id="save">שמור הגדרות</button><span class="small muted">ההגדרות חלות מהסריקה הבאה.</span></div>
 
     <section class="panel"><div class="panel-h"><h2>יומן החלטות</h2><span class="sub">כל ההחלטות שנרשמו, מהחדשה לישנה</span></div>
@@ -52,22 +92,38 @@ export async function render({ el, setTitle, refreshStatus, state }) {
       בתיקייה הזו נשמרים מסד הנתונים של האפליקציה, עותקים מקומיים של קבצי STEP שנקראו (מטמון), תוצאות הסריקות וקבצי ה-Excel. אפשר למחוק אותה בכל רגע.
     </div></section>`;
 
+  const dayField = () => { el.querySelector("#sc-day-f").hidden = el.querySelector("#sc-freq").value === "daily"; };
+  el.querySelector("#sc-freq").onchange = dayField;
+  dayField();
   let resetTh = false;
   el.querySelector("#reset").onclick = () => { el.querySelector("#near").value = "10.0"; el.querySelector("#names").value = "90"; resetTh = true; };
-  el.querySelector("#save").onclick = async () => {
-    if (isStatic) { toast("שינוי הגדרות זמין באפליקציה המקומית"); return; }
+  const val = (id) => el.querySelector(id).value.trim();
+  const on = (id) => el.querySelector(id).checked;
+  const save = async () => {
     const num = (id) => Number(el.querySelector(id).value);
     const cost = el.querySelector("#cost").value.trim();
     const near = Math.round(num("#near") * 10) / 1000, names = Math.round(num("#names")) / 100;
     const thresholds = resetTh ? {} : { ...th };
     if (Math.abs(near - 0.1) > 1e-9) thresholds.geo_near = near; else delete thresholds.geo_near;
     if (Math.abs(names - 0.9) > 1e-9) thresholds.name_similar = names; else delete thresholds.name_similar;
+    await send("PUT", "/api/settings", { user_name: el.querySelector("#user").value.trim(),
+      mass_tolerance: num("#mass") / 100, workers: Math.max(1, Math.round(num("#workers"))),
+      cost_per_pn_year: cost === "" ? null : Number(cost), thresholds,
+      schedule: { enabled: on("#sc-on"), frequency: val("#sc-freq"), weekday: Number(val("#sc-day")), time: val("#sc-time") || "06:00" },
+      email: { enabled: on("#em-on"), host: val("#em-host"), port: Number(val("#em-port")) || 587, security: val("#em-sec"),
+        user: val("#em-user"), password: el.querySelector("#em-pw").value, sender: val("#em-from"), to: val("#em-to"),
+        on: val("#em-when"), after_manual: on("#em-manual") } });
+  };
+  el.querySelector("#save").onclick = async () => {
+    if (isStatic) { toast("שינוי הגדרות זמין באפליקציה המקומית"); return; }
+    try { await save(); toast("ההגדרות נשמרו"); await refreshStatus(); } catch (e) { toast(e.message, true); }
+  };
+  el.querySelector("#em-test").onclick = async () => {
+    if (isStatic) { toast("שליחת מייל זמינה באפליקציה המקומית"); return; }
     try {
-      await send("PUT", "/api/settings", { user_name: el.querySelector("#user").value.trim(),
-        mass_tolerance: num("#mass") / 100, workers: Math.max(1, Math.round(num("#workers"))),
-        cost_per_pn_year: cost === "" ? null : Number(cost), thresholds });
-      toast("ההגדרות נשמרו");
-      await refreshStatus();
+      await save();
+      const r = await send("POST", "/api/notify/test");
+      toast(`נשלח מייל בדיקה ל-${r.to.join(", ")}`);
     } catch (e) { toast(e.message, true); }
   };
 }

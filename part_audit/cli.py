@@ -7,6 +7,9 @@
         # pre-release check against the app's latest scan; exit code 0 = not found (a new part number may be opened),
         # 1 = the part already exists or the planned part number is taken, 3 = needs a look (near-identical, mirror,
         # same shape with another specification, geometry not readable), 2 = cannot check
+    python -m part_audit rescan [--workspace DIR] [--no-email]
+        # scan the sources configured in the app now, compare with the scan before and e-mail the changes when that
+        # is turned on in the app's settings (for a task of the OS scheduler while the app is closed)
 """
 from __future__ import annotations
 
@@ -55,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
     ck.add_argument("--workspace", default=str(Path.home() / "PartAudit"), help="the app's workspace (its latest scan)")
     ck.add_argument("--json", action="store_true", help="print the whole result as JSON")
 
+    rs = sub.add_parser("rescan", help="scan the sources configured in the app's workspace (OS task scheduler)")
+    rs.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
+    rs.add_argument("--no-email", action="store_true", help="do not send the e-mail even when it is turned on")
+
     ap_app = sub.add_parser("app", help="start the local web app (Hebrew UI) on 127.0.0.1")
     ap_app.add_argument("--port", type=int, default=8765)
     ap_app.add_argument("--host", default="127.0.0.1", help="loopback only (127.0.0.1, localhost, ::1)")
@@ -68,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_app(args)
     if args.cmd == "check":
         return run_check(args)
+    if args.cmd == "rescan":
+        return run_rescan(args)
     if args.cmd == "fingerprint":
         from .geometry import fingerprint_path
         print(json.dumps(fingerprint_path(args.file), indent=1, default=str))
@@ -151,6 +160,35 @@ def run_check(args) -> int:
     return 0 if v["kind"] == "new" else 3
 
 
+def run_rescan(args) -> int:
+    """One scan of the workspace's sources, like the app's button; prints what changed since the scan before."""
+    import time
+
+    from .runner import run_scan
+    from .server.store import Store
+    store = Store(args.workspace)
+    if not [s for s in store.list_sources() if s["enabled"]]:
+        print(f"no active sources in {args.workspace} - add them in the app first", file=sys.stderr)
+        return 2
+    if any(s["simulated"] for s in store.list_sources() if s["enabled"]):
+        print("note: the demo systems run inside the app - keep the app open while this scan runs")
+    last = [""]
+
+    def progress(stage, frac, detail):
+        if detail != last[0]:
+            last[0] = detail
+            print(f"[{time.strftime('%H:%M:%S')}] {detail}", flush=True)
+    try:
+        out = run_scan(store, progress, lambda: False, trigger="cli", send_email=not args.no_email)
+    except Exception as exc:
+        print(f"scan failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    print(f"run {out['run_id']}: {out['summary']['parts']} parts, {out['summary']['groups']} duplicate groups")
+    if out.get("headline"):
+        print(out["headline"])
+    return 0
+
+
 def _running_here(url: str) -> bool:
     """True if a PartAudit app already answers on this address (asked directly, never through a proxy)."""
     import json
@@ -195,7 +233,7 @@ def run_app(args) -> int:
             port = p
             break
     url = f"http://{name}:{port}"
-    app = create_app(args.workspace, demo=not args.no_demo, base_url=url)
+    app = create_app(args.workspace, demo=not args.no_demo, base_url=url, scheduler=True)
     print(f"PartAudit is running: {url}  (workspace: {args.workspace})  - close this window to stop")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
