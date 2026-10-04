@@ -13,11 +13,11 @@ export async function render({ el, setTitle, refreshStatus, state }) {
   const count = (d) => rows.filter((r) => (d === "pending" ? !r.decision : r.decision === d)).length;
 
   el.innerHTML = `
-    <section class="kpis">
-      <div class="kpi"><span class="label">שורות מיפוי</span><span class="value">${n0(rows.length)}</span><span class="note">מק"ט קיים ← מק"ט שנשאר</span></div>
-      <div class="kpi"><span class="label">אושרו</span><span class="value" style="color:var(--ok)" id="k-ok">${n0(count("approve"))}</span><span class="note">מסומנות "מאושר" בקובץ ה-Excel – לביצוע</span></div>
-      <div class="kpi"><span class="label">נדחו</span><span class="value" style="color:var(--bad)" id="k-bad">${n0(count("reject"))}</span><span class="note">מסומנות "נדחה" – לא משנים</span></div>
-      <div class="kpi"><span class="label">ממתינים</span><span class="value" id="k-wait">${n0(count("pending"))}</span><span class="note">החלטה על קבוצה חלה על כל השורות שלה</span></div>
+    <section class="readout">
+      <div class="cell"><span class="r-label">שורות מיפוי</span><span class="r-value">${n0(rows.length)}</span><span class="r-note">מק"ט קיים ← מק"ט שנשאר</span></div>
+      <div class="cell ok"><span class="r-label">אושרו</span><span class="r-value" id="k-ok">${n0(count("approve"))}</span><span class="r-note">מסומנות "מאושר" בקובץ ה-Excel, לביצוע</span></div>
+      <div class="cell bad"><span class="r-label">נדחו</span><span class="r-value" id="k-bad">${n0(count("reject"))}</span><span class="r-note">מסומנות "נדחה", לא משנים</span></div>
+      <div class="cell act"><span class="r-label">ממתינים</span><span class="r-value" id="k-wait">${n0(count("pending"))}</span><span class="r-note">החלטה על קבוצה חלה על כל השורות שלה</span></div>
     </section>
     <div class="callout small">התוכנה לא משנה שום דבר ב-ERP או ב-PDM. אחרי האישורים מייצאים קובץ Excel, והצוות מבצע את ההחלפות לפי הנהלים שלכם.
       ההחלטה האחרונה קובעת: החלטה על שורה אחרי ההחלטה על הקבוצה היא חריג לשורה הזו, והחלטה חדשה על הקבוצה חלה שוב על כל השורות שלה.</div>

@@ -29,7 +29,7 @@ export async function render({ el, setTitle, param }) {
       <td>${pnChip(p.b_pn)} <div class="small">${esc(p.b_name)}</div><div class="small muted">${esc(p.b_source)}</div></td>
       <td class="small" style="max-width:420px">${esc(p.reason_he)}${p.spec_note ? `<div class="muted">${esc(p.spec_note)}</div>` : ""}</td>
       <td class="n">${p.metrics?.d_volume != null ? pct(p.metrics.d_volume, 2) : "—"}</td><td class="n">${confBar(p.confidence)}</td>
-      <td>${decisionPill(p.decision)}</td><td>${p.has_step ? '<span class="small nowrap">מפת סטיות ←</span>' : ""}</td></tr>`).join("")
+      <td>${decisionPill(p.decision)}</td><td>${p.has_step ? '<span class="small nowrap">מפת סטיות</span>' : ""}</td></tr>`).join("")
       || '<tr><td colspan="7"><div class="empty">אין זוגות בקטגוריה הזו</div></td></tr>';
   };
   const tabEl = el.querySelector("#tabs");

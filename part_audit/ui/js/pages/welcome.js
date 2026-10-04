@@ -45,10 +45,10 @@ function diagram() {
   return `<svg viewBox="0 0 360 300" width="100%" style="max-width:420px;display:block;margin:auto;direction:ltr" role="img" aria-label="מערכות מתחברות לבקרה אחת">
     ${sys.map(([c, col, label], i) => {
       const y = 22 + i * 46;
-      return `<g><rect x="230" y="${y}" width="120" height="34" rx="6" fill="var(--surface)" stroke="var(--line)"/>
-        <rect x="236" y="${y + 7}" width="20" height="20" rx="4" fill="${col}"/><text x="246" y="${y + 21}" fill="#fff" font-size="9" text-anchor="middle" font-family="var(--mono)">${c}</text>
-        <text x="342" y="${y + 22}" fill="var(--ink)" font-size="11" text-anchor="end">${label}</text>
-        <path d="M230 ${y + 17} C 190 ${y + 17}, 170 150, 130 150" stroke="var(--line-strong)" fill="none"/></g>`;
+      return `<g><rect x="200" y="${y}" width="152" height="34" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)"/>
+        <rect x="207" y="${y + 7}" width="22" height="20" rx="5" fill="${col}"/><text x="218" y="${y + 21}" fill="#fff" font-size="9" text-anchor="middle" font-family="var(--mono)">${c}</text>
+        <text x="343" y="${y + 22}" fill="var(--ink)" font-size="11" text-anchor="end">${label}</text>
+        <path d="M200 ${y + 17} C 165 ${y + 17}, 160 150, 130 150" stroke="var(--line-strong)" fill="none"/></g>`;
     }).join("")}
     <rect x="20" y="118" width="110" height="64" rx="8" fill="var(--rail)"/>
     <text x="75" y="146" fill="#d9a54a" font-size="13" text-anchor="middle" font-weight="700">PartAudit</text>

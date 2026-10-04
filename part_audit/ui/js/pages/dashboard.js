@@ -8,17 +8,26 @@ export async function render({ el, setTitle, state }) {
   const s = d.summary;
   const cur = s.currency || "ILS";
   const kindOf = Object.fromEntries(d.sources.map((x) => [x.name, x.kind]));
+  const share = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   el.innerHTML = `
-  <section class="kpis">
-    ${kpi("חלקים שנסרקו", n0(s.parts), `${n0(s.assemblies)} מכלולים · ${n0(s.sources)} מקורות · ${n0(s.with_step)} עם STEP`, "#/parts")}
-    ${kpi("קבוצות כפילות", n0(s.groups), `${n0(s.parts_in_groups)} רשומות · ${n0(s.groups_cross_source)} חוצות מערכות`, "#/groups", true)}
-    ${kpi("מק\"טים שאפשר לבטל", n0(s.redundant_pns), "אחרי אישור – אחד בכל קבוצה נשאר", "#/mapping", true)}
-    ${kpi("מלאי במק\"טים הכפולים", money(s.redundant_stock_value, cur), "כמות × עלות מה-ERP, בלי המק\"ט שנשאר", "#/groups")}
-    ${kpi("כמעט זהים", n0(s.near_pairs), "זוגות שאפשר אולי לתקנן לחלק אחד", "#/near")}
-    ${kpi("ממתינים לאישור", n0(d.decisions.pending_groups), `${n0(d.decisions.approved_groups)} קבוצות כבר אושרו`, "#/mapping")}
-    ${kpi("בעיות איכות", n0(s.quality_high + s.quality_medium), `${n0(s.quality_high)} בחומרה גבוהה`, "#/quality")}
-    ${kpi("פערים בין PDM ל-ERP", n0(s.erp_issues), "חסרים, תיאור, חומר, סטטוס, עץ מוצר", "#/erp")}
+  <section class="readout" aria-label="הממצאים העיקריים">
+    ${cell("קבוצות כפילות", n0(s.groups), `${n0(s.parts_in_groups)} רשומות, ${n0(s.groups_cross_source)} מהן חוצות מערכות`, "#/groups")}
+    ${cell("מק\"טים שאפשר לבטל", n0(s.redundant_pns), "אחרי אישור נשאר מק\"ט אחד בכל קבוצה", "#/mapping")}
+    ${cell("מלאי במק\"טים הכפולים", money(s.redundant_stock_value, cur), "כמות × עלות מה-ERP, בלי המק\"ט שנשאר", "#/groups")}
+    ${cell("ממתינים לאישור", n0(d.decisions.pending_groups), `${n0(d.decisions.approved_groups)} קבוצות כבר אושרו`, "#/groups", "act")}
   </section>
+  <section class="readout sub" aria-label="ממצאים נוספים">
+    ${cell("חלקים שנסרקו", n0(s.parts), `ועוד ${n0(s.assemblies)} מכלולים מ-${n0(s.sources)} מקורות`, "#/parts")}
+    ${cell("כמעט זהים", n0(s.near_pairs), "זוגות שאולי אפשר לתקנן לחלק אחד", "#/near")}
+    ${cell("בעיות איכות", n0(s.quality_high + s.quality_medium), `${n0(s.quality_high)} בחומרה גבוהה`, "#/quality")}
+    ${cell("פערים בין PDM ל-ERP", n0(s.erp_issues), "חסרים, תיאור, חומר, סטטוס, עץ מוצר", "#/erp")}
+  </section>
+  <section class="panel"><div class="panel-h"><h2>כיסוי הנתונים</h2><span class="sub">על מה מבוססות ההשוואות</span></div>
+    <div class="panel-b gauges">
+      ${gauge("חלקים עם מודל STEP", s.with_step, s.parts, `${share(s.with_step, s.parts)}% נבדקו גם לפי גיאומטריה; השאר לפי שם, מק"ט ומפרט`)}
+      ${gauge("חלקים שמקושרים לפריט ERP", s.erp_linked, s.parts, `${share(s.erp_linked, s.parts)}% עם מלאי, עלות ועץ מוצר מה-ERP`)}
+      ${gauge("חלקים בקבוצת כפילות", s.parts_in_groups, s.parts, `${share(s.parts_in_groups, s.parts)}% מהחלקים רשומים יותר מפעם אחת`)}
+    </div></section>
   <section class="panel"><div class="panel-h"><h2>הקבוצות עם ההשפעה הגדולה</h2><span class="sub">לפי שווי המלאי במק"טים הכפולים</span><span class="spacer"></span><a href="#/groups" class="small">לכל ${n0(s.groups)} הקבוצות</a></div>
     <div class="table-wrap"><table class="t"><thead><tr><th>חלק</th><th>מק"ט שנשאר</th><th>מק"טים כפולים</th><th>מערכות</th><th class="n">שימושים</th><th class="n">מלאי במק"טים הכפולים</th><th>החלטה</th></tr></thead><tbody>
     ${d.top_groups.map((g) => `<tr class="click" data-h="#/group/${g.id}"><td>${esc(g.name)}${g.spec ? ` <span class="small muted mono">${esc(g.spec)}</span>` : ""}</td>
@@ -46,7 +55,7 @@ export async function render({ el, setTitle, state }) {
       </tbody></table></div>
       <div class="panel-b small muted">משך הסריקה: ${Math.round(d.timings.total_s)} שניות לניתוח (${n0(d.timings.geometry_computed ?? 0)} קבצים חושבו, ${n0(d.timings.geometry_cached ?? 0)} מהמטמון) · ${datetime(d.created)}</div></div>
   </section>
-  <section class="panel"><div class="panel-h"><h2>מה עושים עכשיו</h2></div><div class="panel-b grid grid-3">
+  <section class="panel"><div class="panel-h"><h2>מה עושים עכשיו</h2></div><div class="next-steps">
     ${next("1", "לאשר כפילויות", `${n0(d.decisions.pending_groups)} קבוצות ממתינות. כל קבוצה מציגה את החלקים זה לצד זה בתלת-ממד, עם מלאי ושימושים.`, "#/groups")}
     ${next("2", "לבדוק חלקים כמעט זהים", `${n0(s.near_pairs)} זוגות עם הבדל קטן. מפת צבעים מראה בדיוק איפה הם שונים.`, "#/near")}
     ${next("3", "לתקן את הנתונים", `${n0(s.quality_high)} בעיות בחומרה גבוהה ו-${n0(s.erp_issues)} פערים מול ה-ERP.`, "#/quality")}
@@ -54,12 +63,17 @@ export async function render({ el, setTitle, state }) {
   el.querySelectorAll("tr[data-h]").forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.h)));
 }
 
-function kpi(label, value, note, href, accent = false) {
-  return `<div class="kpi ${accent ? "accent" : ""}"><span class="label">${label}</span><span class="value">${value}</span><span class="note">${note}</span>
-    ${href ? `<a class="stretch" href="${href}" aria-label="${label}"></a>` : ""}</div>`;
+function cell(label, value, note, href, tone = "") {
+  return `<a class="cell ${tone}" href="${href}"><span class="r-label">${label}</span><span class="r-value">${value}</span><span class="r-note">${note}</span></a>`;
+}
+function gauge(label, part, whole, note) {
+  const p = whole ? Math.min(100, (100 * part) / whole) : 0;
+  return `<div class="gauge"><div class="g-top"><span>${label}</span><b>${n0(part)} <span class="muted">מתוך</span> ${n0(whole)}</b></div>
+    <div class="g-bar" role="meter" aria-valuemin="0" aria-valuemax="${whole}" aria-valuenow="${part}" aria-label="${label}"><i style="width:${p.toFixed(1)}%"></i></div>
+    <div class="g-note">${note}</div></div>`;
 }
 function next(n, title, text, href) {
-  return `<a class="kpi" href="${href}" style="text-decoration:none;color:inherit"><span class="label mono">${n}</span><b>${title}</b><span class="note" style="font-size:.85rem">${text}</span></a>`;
+  return `<a class="next-step" href="${href}"><span class="n">${n}</span><b>${title}</b><span>${text}</span></a>`;
 }
 function matrix(cross, kindOf) {
   const names = [...new Set(Object.keys(cross).flatMap((k) => k.split("|")))];
