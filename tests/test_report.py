@@ -60,3 +60,15 @@ def test_end_to_end_no_geometry(tmp_path: Path):
     assert row[headers.index("Old PN")] == "PA-20871" and row[headers.index("Approved (Y/N)")] is None
     skipped = [c.value for c in wb["Errors_Skipped"]["A"]][1:]
     assert "legacy.sldprt" in skipped
+
+
+def test_text_from_outside_never_becomes_a_formula(tmp_path: Path):
+    """File names and ERP texts that start with '=' are written as text in every sheet."""
+    root, erp = _folder(tmp_path)
+    (root / "=HYPERLINK(1).step").write_text(make_step(pid="PA-10234", pname="MOUNTING BRACKET"))   # a copy
+    erp.write_text(erp.read_text(encoding="utf-8") + "PA-50001,=1+2,EA,,X\n", encoding="utf-8")
+    res = run_audit(AuditConfig(root=str(root), erp_csv=str(erp), use_geometry=False, verbose=False))
+    wb = load_workbook(write_report(res, tmp_path / "r.xlsx"))
+    cells = [c for ws in wb.worksheets for r in ws.iter_rows() for c in r
+             if isinstance(c.value, str) and c.value.startswith("=")]
+    assert len({c.parent.title for c in cells}) >= 2 and all(c.data_type == "s" for c in cells)

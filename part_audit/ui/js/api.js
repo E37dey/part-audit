@@ -42,13 +42,20 @@ function mainCurrency(curs) {
   const n = (c) => curs.filter((x) => x === c).length;
   return [...new Set(curs)].sort((a, b) => n(b) - n(a) || (a < b ? -1 : a > b ? 1 : 0))[0];
 }
-// what merging into the target changes; targetErpPn is the ERP item the target is linked to (other dashes)
+// a where-used line must change unless it names the target: a PDM/PLM line by part number, an ERP line by the
+// ERP item the target is linked to (decisions.needs_update)
+function needsUpdate(u, targetPn, targetErpPn) {
+  if (u.erp_pn) { const t = pnKey(targetErpPn || targetPn); return !!t && pnKey(u.erp_pn) !== t; }
+  const t = pnKey(targetPn);
+  return !!t && !!u.via && pnKey(u.via) !== t;
+}
+// what merging into the target changes; targetErpPn is the ERP item the target is linked to (decisions.group_impact)
 function groupImpact(g, targetPn, targetErpPn) {
-  const keys = new Set([pnKey(targetPn), pnKey(targetErpPn)].filter(Boolean));
+  const keep = pnKey(targetErpPn || targetPn);
   const main = mainCurrency(g.erp.map((e) => e.currency).filter(Boolean));
-  const value = g.erp.filter((e) => !keys.has(pnKey(e.pn)) && (!main || !e.currency || e.currency === main)).reduce((t, e) => t + (e.value || 0), 0);
+  const value = g.erp.filter((e) => pnKey(e.pn) !== keep && (!main || !e.currency || e.currency === main)).reduce((t, e) => t + (e.value || 0), 0);
   return { redundant_stock_value: Math.round(value * 100) / 100,
-    bom_lines_to_update: g.where_used.filter((u) => keys.size && u.via && !keys.has(pnKey(u.via))).length };
+    bom_lines_to_update: g.where_used.filter((u) => needsUpdate(u, targetPn, targetErpPn)).length };
 }
 // the member whose part number stays: the approved choice, else the proposal (decisions.chosen_target)
 function chosenTarget(g, d) {
@@ -115,7 +122,9 @@ async function staticGet(path, params = {}) {
   if (p === "decisions") return [...memDecisions].reverse();
   if ((m = p.match(/^runs\/[^/]+\/summary$/))) {
     const s = await staticJson("summary.json");
-    const top = await applyDecisions(s.top_groups, "group");
+    // the ten groups with the most stock on duplicate part numbers, after the decisions made in this tab
+    const top = (await applyDecisions(Object.values(await staticJson("group_details.json")), "group"))
+      .sort((a, b) => (b.redundant_stock_value || 0) - (a.redundant_stock_value || 0) || b.members.length - a.members.length).slice(0, 10);
     const decided = new Set(memDecisions.filter((d) => d.target_type === "group").map((d) => d.target_id));
     const approved = new Set(memDecisions.filter((d) => d.target_type === "group" && latestDecision("group", d.target_id)?.decision === "approve").map((d) => d.target_id));
     // money and BOM lines follow the targets approved in this tab
@@ -212,9 +221,10 @@ export async function send(method, path, body) {
       const now = new Date().toISOString();
       const details = body.target_type === "group" ? await staticJson("group_details.json") : {};
       ids.forEach((id) => {
-        // like the app: a group decision always records its target (chosen now, chosen before, or proposed)
+        // like the app: a group decision always records its target - the one chosen now, else the one in effect
+        // (approved before, else the proposal), so a bulk decision acts on what the list shows
         const master = body.target_type === "group"
-          ? body.master_uid || latestDecision("group", id)?.master_uid || details[id]?.master_uid || "" : "";
+          ? body.master_uid || (details[id] ? chosenTarget(details[id], latestDecision("group", id))?.uid : "") || "" : "";
         memDecisions.push({ ...body, target_id: id, master_uid: master, created: now, user: body.user || "צופה בהדגמה",
           seq: memDecisions.length + 1 });
       });

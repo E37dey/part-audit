@@ -59,6 +59,8 @@ def _write_table(ws, rows: list[dict], columns: list[tuple[str, str, int]], star
             if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
                 v = None
             c = ws.cell(row=r, column=ci, value=v)
+            if isinstance(v, str) and v.startswith("="):
+                c.data_type = "s"     # file names and ERP texts come from outside: never let one become a formula
             if key in pct_cols and isinstance(v, (int, float)):
                 c.number_format = "0.0000%"
             if key in wrap_cols:
@@ -371,7 +373,9 @@ def _summary(ws, res, rows) -> None:
     r += 1
     for k, v in run:
         ws.cell(row=r, column=1, value=k).font = BOLD
-        ws.cell(row=r, column=2, value=v)
+        c = ws.cell(row=r, column=2, value=v)
+        if isinstance(v, str) and v.startswith("="):
+            c.data_type = "s"
         r += 1
     r += 1
     ws.cell(row=r, column=1, value="Timings (seconds) and thresholds").font = SECTION_FONT

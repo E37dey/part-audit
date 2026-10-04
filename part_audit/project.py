@@ -321,16 +321,21 @@ def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | P
                                  "active": e.active, "supplier": e.supplier,
                                  "is_master": (links[master.uid].pn == e.pn) if master.uid in links
                                  else (bool(master.pn) and pn_key(e.pn) == pn_key(master.pn))})
-        used = []
+        used, erp_seen = [], set()
         for r in members:
             for par, q in parents_of.get(r.uid, []):
                 pr = by_uid[par]
                 used.append({"uid": pr.uid, "pn": pr.pn, "name": pr.name, "source": src_name.get(pr.source_id, pr.source_id),
                              "qty": q, "via": r.pn, "state": pr.state})
-            for ppn, q in erp_parents.get(pn_key(erp_pn(r)), []) if r.pn else []:
+            # ERP BOM lines name an ERP item: listed once, even when several members are linked to that item
+            child = erp_pn(r) if r.pn else ""
+            for ppn, q in erp_parents.get(pn_key(child), []) if child else []:
+                if (pn_key(ppn), pn_key(child)) in erp_seen:
+                    continue
+                erp_seen.add((pn_key(ppn), pn_key(child)))
                 used.append({"uid": "", "pn": ppn, "name": (erp_by_key.get(pn_key(ppn)).description
                                                             if erp_by_key.get(pn_key(ppn)) else ""),
-                             "source": "ERP", "qty": q, "via": r.pn, "state": ""})
+                             "source": "ERP", "qty": q, "via": r.pn, "erp_pn": child, "state": ""})
         products = set()
         for r in members:
             for t in _top_products(r.uid, parents_of, by_uid):

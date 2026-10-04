@@ -98,6 +98,12 @@ def test_impact_counts_the_target_by_its_erp_item():
     imp = group_impact(g, "900-5961", "9005961")
     assert imp["redundant_stock_value"] == 40.0 and imp["bom_lines_to_update"] == 2
     assert group_impact(g, "900-5961")["redundant_stock_value"] == 140.0   # without the link: the target's own stock
+    # a PDM line is compared by part number, an ERP line by the ERP item it names
+    from part_audit.decisions import needs_update
+    assert needs_update({"via": "900-5961"}, "9005961", "900-5961")              # the PDM still says 900-5961
+    assert not needs_update({"via": "900-5962", "erp_pn": "9005961"}, "900-5961", "9005961")
+    assert needs_update({"via": "900-5961", "erp_pn": "900-5962"}, "900-5961", "9005961")
+    assert needs_update({"via": "900-5961", "erp_pn": "9005961"}, "900-5962")    # target not in the ERP
     # a tie between currencies does not depend on the order of the rows (or on the run)
     assert main_currency(["USD", "ILS"]) == main_currency(["ILS", "USD"]) == "ILS"
     assert main_currency(["USD", "ILS"], default="USD") == "USD"

@@ -19,6 +19,7 @@ from .. import __version__, connectors
 from ..demo import DEMO_DIR, demo_sources
 
 from ..decisions import chosen_target, effective_mapping, group_impact, row_decision
+from ..names import pn_key
 from ..project import ProjectSettings, audit_snapshot, collect
 from .store import Store
 
@@ -509,7 +510,9 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         children = [{"uid": c["child"], **{k: idx[c["child"]][k] for k in ("pn", "name", "source", "state", "state_class",
                                                                            "kind")},
                      "qty": c["qty"]} for c in res["bom"].get(uid, []) if c["child"] in idx]
-        erp_parents = [b for b in res.get("erp_bom", []) if p["pn"] and b["child"] == p["pn"]]
+        # the ERP BOM names the ERP item the part is linked to (the ERP may write the number with other dashes)
+        erp_child = pn_key((p.get("erp") or {}).get("pn") or p["pn"] or "")
+        erp_parents = [b for b in res.get("erp_bom", []) if erp_child and pn_key(b["child"]) == erp_child]
         rel_pairs = [dict(x, other=idx[x["b"] if x["a"] == uid else x["a"]]) for x in res["pairs"]
                      if uid in (x["a"], x["b"])]
         issues = [q for q in res["quality"] + res["erp_issues"] if uid in q.get("uids", [])]
@@ -612,15 +615,16 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             raise HTTPException(400, "מק\"ט יעד אפשר לבחור רק לקבוצה אחת")
         masters = {}
         if body["target_type"] == "group":
-            # every group decision records the target it is about: the one chosen now, else the one chosen before,
-            # else the current proposal - so a bulk approval or a rescan never changes what was approved
+            # every group decision records the target it is about: the one chosen now, else the one in effect (the
+            # one approved before, else the proposal) - a bulk decision acts on what the list shows, and a rescan
+            # never changes what was approved
             _, res = load_result("latest")
             groups, idx, dec = res["_groups"], res["_index"], store.current_decisions()
             for tid in ids:
                 g = groups.get(tid)
                 if not g:
                     raise HTTPException(404, "הקבוצה לא נמצאה")
-                mu = body.get("master_uid") or (dec.get(f"group:{tid}") or {}).get("master_uid") or g["master_uid"]
+                mu = body.get("master_uid") or chosen_target(g, dec.get(f"group:{tid}"), idx)
                 if mu not in g["members"] or not idx[mu]["pn"]:
                     if body.get("master_uid"):
                         raise HTTPException(400, "מק\"ט היעד חייב להיות אחת הרשומות בקבוצה, עם מק\"ט")

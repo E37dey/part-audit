@@ -81,17 +81,27 @@ def main_currency(currencies: list[str], default: str | None = None) -> str | No
     return sorted(set(currencies), key=lambda c: (-currencies.count(c), c != default, c))[0]
 
 
+def needs_update(line: dict, target_pn: str, target_erp_pn: str | None = None) -> bool:
+    """Whether a where-used line must change when the group is merged into target_pn. A PDM/PLM BOM line names a
+    part number: it changes unless that is the target's. An ERP BOM line names an ERP item: it changes unless that
+    is the item the target is linked to (the ERP may write the number with other dashes)."""
+    if line.get("erp_pn"):
+        t = pn_key(target_erp_pn or target_pn or "")
+        return bool(t) and pn_key(line["erp_pn"]) != t
+    t = pn_key(target_pn or "")
+    return bool(t) and bool(line.get("via")) and pn_key(line["via"]) != t
+
+
 def group_impact(group: dict, target_pn: str, target_erp_pn: str | None = None) -> dict:
-    """What merging the group into target_pn changes: part numbers dropped, stock held on them (only ERP rows in
-    the group's main currency are added up; no conversion), BOM lines that point at a dropped part number.
-    target_erp_pn is the ERP item the target is linked to, when the ERP writes the number differently."""
-    keys = {k for k in (pn_key(target_pn or ""), pn_key(target_erp_pn or "")) if k}
-    dropped = [e for e in group["erp"] if pn_key(e["pn"]) not in keys]
+    """What merging the group into target_pn changes: part numbers dropped, stock held on the other ERP items (only
+    rows in the group's main currency are added up; no conversion), BOM lines that must be updated.
+    target_erp_pn is the ERP item the target is linked to, when there is one."""
+    keep = pn_key(target_erp_pn or target_pn or "")
+    dropped = [e for e in group["erp"] if pn_key(e["pn"]) != keep]
     main = main_currency([e.get("currency") for e in group["erp"] if e.get("currency")])
     value = sum(e["value"] or 0 for e in dropped if not main or not e.get("currency") or e.get("currency") == main)
     return {"redundant_pns": max(0, len(group["pns"]) - 1), "redundant_stock_value": round(value, 2),
-            "bom_lines_to_update": sum(1 for u in group["where_used"]
-                                       if keys and u["via"] and pn_key(u["via"]) not in keys),
+            "bom_lines_to_update": sum(1 for u in group["where_used"] if needs_update(u, target_pn, target_erp_pn)),
             "currency": main}
 
 

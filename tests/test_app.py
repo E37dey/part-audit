@@ -94,6 +94,46 @@ def test_erp_that_writes_the_number_without_dashes(plant, tmp_path):
     assert {e["pn"]: e["is_master"] for e in g["erp"]} == {"1000001": True, "100-0002": False}
 
 
+def test_two_systems_one_erp_item(tmp_path):
+    """Site A writes 100-0001, site B writes 1000001 like the ERP; the ERP BOM uses the item once. Its BOM line is
+    listed once and needs no change whichever record stays; the part card finds it through the ERP link."""
+    from openpyxl import Workbook
+    from fastapi.testclient import TestClient
+    from part_audit.server.app import create_app
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    base = cadops.chiral_test_part()
+    cadops.write_step(base, str(tmp_path / "a" / "100-0001 - תושבת.step"))
+    cadops.write_step(base, str(tmp_path / "b" / "1000001 - תושבת.step"))
+    wb = Workbook()
+    wb.active.title = "items"
+    for row in (["מק\"ט", "תיאור", "מלאי", "עלות"], ["1000001", "תושבת פלדה", 10, 50], ["500-0001", "מכלול", 1, 900]):
+        wb.active.append(row)
+    bom = wb.create_sheet("BOM")
+    for row in (["parent", "child", "qty"], ["500-0001", "1000001", 2]):
+        bom.append(row)
+    wb.save(tmp_path / "erp.xlsx")
+    srcs = [{"id": "a", "kind": "folder", "name": "A", "config": {"path": str(tmp_path / "a")}, "enabled": True},
+            {"id": "b", "kind": "folder", "name": "B", "config": {"path": str(tmp_path / "b")}, "enabled": True},
+            {"id": "erp", "kind": "erp_file", "name": "ERP", "config": {"path": str(tmp_path / "erp.xlsx")}, "enabled": True}]
+    res = audit_snapshot(collect(srcs, tmp_path / "c"), ProjectSettings(workers=1), tmp_path / "c")
+    g = next(x for x in res["groups"] if set(x["pns"]) == {"100-0001", "1000001"})
+    assert [(w["source"], w["pn"]) for w in g["where_used"]] == [("ERP", "500-0001")]
+    assert g["bom_lines_to_update"] == 0 and g["redundant_stock_value"] == 0
+    from part_audit.decisions import group_impact
+    for uid in g["members"]:                                     # either record can stay: the ERP item is the same
+        p = next(x for x in res["parts"] if x["uid"] == uid)
+        assert group_impact(g, p["pn"], p["erp"]["pn"])["bom_lines_to_update"] == 0
+    # the part card of the record that writes the dashes shows the ERP parent through the link
+    app = create_app(tmp_path / "ws", factory_dir=None, demo=False)
+    with TestClient(app, base_url="http://127.0.0.1:8765") as c:
+        for s in srcs:
+            c.post("/api/sources", json=s)
+        assert _scan(c)["status"] == "done"
+        uid = next(p["uid"] for p in c.get("/api/runs/latest/parts", params={"q": "100-0001"}).json()["rows"])
+        assert [b["parent"] for b in c.get(f"/api/runs/latest/parts/{uid}").json()["erp_parents"]] == ["500-0001"]
+
+
 def test_quality_findings(result):
     types = {q["type"] for q in result["quality"] + result["erp_issues"]}
     assert "erp_without_cad" in types                            # 999-9999 has no model
@@ -269,14 +309,20 @@ def test_group_decisions_keep_their_target(client):
     groups = client.get("/api/runs/latest/groups").json()
     gid = next(g["id"] for g in groups if "100-0002" in g["pns"])
     g = client.get(f"/api/runs/latest/groups/{gid}").json()
-    target = next(p["uid"] for p in g["parts"] if p["pn"] == "100-0001")
-    client.post("/api/decisions", json={"target_type": "group", "target_id": gid, "decision": "review", "master_uid": target})
-    # a bulk approval later must keep the target chosen before
-    client.post("/api/decisions", json={"target_type": "group", "target_ids": [gid], "decision": "approve"})
-    g2 = client.get(f"/api/runs/latest/groups/{gid}").json()
-    assert g2["decision"] == "approve" and g2["decision_master"] == target and g2["final_master_pn"] == "100-0001"
+    other = next(p["uid"] for p in g["parts"] if p["pn"] == "100-0002")
+
+    def decide(decision, **kw):
+        client.post("/api/decisions", json={"target_type": "group", "target_ids": [gid], "decision": decision, **kw})
+        return client.get(f"/api/runs/latest/groups/{gid}").json()
+    client.post("/api/decisions", json={"target_type": "group", "target_id": gid, "decision": "approve", "master_uid": other})
+    g2 = decide("approve")                     # a later bulk approval keeps the target approved before
+    assert g2["decision_master"] == other and g2["final_master_pn"] == "100-0002"
+    g2 = decide("review")                      # under review: the pick is remembered, the proposal is in effect
+    assert g2["decision_master"] == other and g2["final_master_pn"] == "100-0001"
+    g2 = decide("approve")                     # a bulk approval approves what the list shows
+    assert g2["decision_master"] == g["master_uid"] and g2["final_master_pn"] == "100-0001"
     assert client.post("/api/decisions", json={"target_type": "group", "target_ids": [gid, gid], "decision": "approve",
-                                               "master_uid": target}).status_code == 400
+                                               "master_uid": other}).status_code == 400
 
 
 def test_stopped_scan_is_not_kept(client):
