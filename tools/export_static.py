@@ -162,6 +162,7 @@ def main() -> None:
                                  for s in get("/api/sources")])
     dump(data / "runs.json", get("/api/runs"))
     summary = get("/api/runs/latest/summary")
+    summary["sources"] = [{k: v for k, v in x.items() if k != "url"} for x in summary["sources"]]   # no addresses
     dump(data / "summary.json", summary)
 
     groups = get("/api/runs/latest/groups")
