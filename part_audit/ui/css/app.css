@@ -493,6 +493,17 @@ input[type="checkbox"] { accent-color: var(--dye); width: 15px; height: 15px; }
   .v-body h2 { font-size: 1.35rem; }
 }
 
+/* variety: a map of the screw sizes in use (diameter x length) */
+table.grid-map th, table.grid-map td { text-align: center; padding: 5px 6px; }
+table.grid-map tbody th { background: var(--surface-2); font-weight: 500; color: var(--ink-2); }
+table.grid-map td { position: relative; min-width: 66px; border-inline-start: 1px solid var(--line); }
+table.grid-map td b { display: block; font-family: var(--mono); font-weight: 600; font-size: 0.95rem; }
+table.grid-map td span { display: block; font-size: 0.68rem; color: var(--muted); white-space: nowrap; }
+table.grid-map td.many { background: var(--warn-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent); }
+table.grid-map td.many b { color: var(--warn); }
+table.grid-map td.unused:not(.many) { background: var(--surface-3); }
+table.grid-map td i { position: absolute; top: 2px; inset-inline-end: 4px; font-style: normal; font-size: 0.7rem; color: var(--info); }
+
 /* shape search: a relative closeness bar (a ranking, not a percentage) */
 .simbar { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .simbar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--dye), var(--info)); }

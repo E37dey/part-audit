@@ -666,6 +666,18 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 "issues": issues, "history": hist, "props": props,
                 "products": [{"uid": t, "pn": idx[t]["pn"], "name": idx[t]["name"]} for t in tops if t in idx]}
 
+    variety_cache: dict[str, dict] = {}
+
+    @app.get("/api/runs/{rid}/variety")
+    def variety(rid: str):
+        """Standard parts by specification and designed parts by family: what is in use and how much (measured)."""
+        from ..variety import analyze
+        rid, res = load_result(rid)
+        if rid not in variety_cache:
+            variety_cache.clear()
+            variety_cache[rid] = analyze(res)
+        return variety_cache[rid]
+
     @app.get("/api/runs/{rid}/similar/{uid:path}")
     def similar(rid: str, uid: str, k: int = 10):
         """Parts whose shape is closest to this one (shape search), with the engine's verdict where it has one."""

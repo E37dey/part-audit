@@ -251,3 +251,10 @@ def test_similar_api(client, scan):
     assert r["available"] and r["compared"] == 2
     assert r["rows"][0]["part"]["pn"] == "100-0002" and r["rows"][0]["relation"] == "same_group"
     assert client.get("/api/runs/latest/similar/nope").status_code == 404
+
+
+def test_variety_api(client, scan):
+    v = client.get("/api/runs/latest/variety").json()
+    fams = {f["family"]: f for f in v["families"]}
+    assert fams["bracket"]["records"] == 2 and fams["bracket"]["designs"] == 1      # the two brackets are one design
+    assert fams["plate"]["designs"] == 1 and v["summary"]["standard_specs"] == 0

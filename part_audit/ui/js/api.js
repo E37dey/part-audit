@@ -203,6 +203,7 @@ async function staticGet(path, params = {}) {
     if (!x) throw new Error("ההשוואה לסריקה הזו לא נכללה בגרסה המקוונת");
     return x;
   }
+  if ((m = p.match(/^runs\/[^/]+\/variety$/))) return staticJson("variety.json");
   if ((m = p.match(/^runs\/[^/]+\/similar\/(.+)$/))) {
     const x = (await staticJson("similar.json"))[decodeURIComponent(m[1])];
     return x || { available: false, rows: [] };

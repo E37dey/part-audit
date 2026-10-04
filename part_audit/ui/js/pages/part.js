@@ -76,7 +76,7 @@ export async function render({ el, param, setTitle }) {
           : '<div class="panel-b muted small">המערכת לא החזירה היסטוריית גרסאות לרשומה הזו.</div>'}</div>
       <div class="panel"><div class="panel-h"><h2>כל המאפיינים מהמערכת</h2><span class="sub">כמו שהם, בלי עיבוד</span></div>
         ${Object.keys(p.props || {}).length ? `<div class="table-wrap" style="max-height:340px"><table class="t"><tbody>
-          ${Object.entries(p.props).map(([k, v]) => `<tr><td class="mono small ltr">${esc(k)}</td><td class="small">${esc(typeof v === "object" && v ? (v.Display ?? JSON.stringify(v)) : v)}</td></tr>`).join("")}</tbody></table></div>`
+          ${Object.entries(p.props).map(([k, v]) => `<tr><td><span class="mono small ltr">${esc(k)}</span></td><td class="small">${esc(typeof v === "object" && v ? (v.Display ?? JSON.stringify(v)) : v)}</td></tr>`).join("")}</tbody></table></div>`
           : '<div class="panel-b muted small">אין מאפיינים נוספים (למשל קובץ מתיקייה).</div>'}</div>
     </section>`;
 

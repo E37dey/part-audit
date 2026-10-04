@@ -191,7 +191,7 @@ async function discover(s, k, refresh) {
       (היום: ${n0(d.pn_found)}). <label class="check" style="display:inline-flex;margin-inline-start:8px"><input type="checkbox" id="apply-rx" checked> להחיל</label></div>` : ""}
     <details><summary><b>כל המאפיינים שנמצאו</b> <span class="small muted">(${n0(d.properties.length)})</span></summary>
       <div class="table-wrap" style="max-height:340px;margin-top:8px"><table class="t"><thead><tr><th>מאפיין</th><th>מילוי</th><th class="n">ערכים שונים</th><th>דוגמאות</th></tr></thead><tbody>
-      ${d.properties.map((p) => `<tr><td class="mono small ltr">${esc(p.name)}</td><td>${fillPill(p.fill)}</td><td class="n">${n0(p.distinct)}</td><td class="small">${exChips(p.examples)}</td></tr>`).join("")}
+      ${d.properties.map((p) => `<tr><td><span class="mono small ltr">${esc(p.name)}</span></td><td>${fillPill(p.fill)}</td><td class="n">${n0(p.distinct)}</td><td class="small">${exChips(p.examples)}</td></tr>`).join("")}
       </tbody></table></div></details>
     <div class="row">
       <button class="btn primary" id="apply" ${sugg.length || rx ? "" : "disabled"}>החל את ההצעות שסומנו</button>

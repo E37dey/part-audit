@@ -196,6 +196,7 @@ def main() -> None:
     parts = get("/api/runs/latest/parts", limit=1_000_000)["rows"]
     dump(data / "parts.json", parts)
     dump(data / "part_details.json", {p["uid"]: get(f"/api/runs/latest/parts/{p['uid']}") for p in parts})
+    dump(data / "variety.json", get("/api/runs/latest/variety"))
     # shape search: the ten closest shapes of every part with a model
     dump(data / "similar.json", {p["uid"]: get(f"/api/runs/latest/similar/{p['uid']}", k=10)
                                  for p in parts if p["has_step"] and p["kind"] == "part"})
