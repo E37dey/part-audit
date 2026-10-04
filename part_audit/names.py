@@ -557,6 +557,35 @@ def best_match(sources_a: list[NameParts], sources_b: list[NameParts], index: "N
     return best
 
 
+def block_keys(sources: list[NameParts]) -> set[str]:
+    """Blocking keys of one item's names: PN cores (also with one substituted digit or two swapped digits),
+    PN keys, words and word pairs."""
+    keys: set[str] = set()
+    for np_ in sources:
+        for p in np_.pns:
+            core = pn_core(p)
+            if len(core) >= 4:
+                keys.add("c:" + core)
+                if len(core) >= 5:  # typo-tolerant: one substituted digit or two swapped digits
+                    for k in range(len(core)):
+                        keys.add("cd:" + core[:k] + "_" + core[k + 1:])
+                    for k in range(len(core) - 1):
+                        keys.add("cs:" + core[:k] + "__" + core[k + 2:])
+        for k in np_.pn_keys:
+            keys.add("k:" + k)
+        uniq = sorted(set(np_.words))
+        for w in uniq:
+            keys.add("w:" + w)
+        for w1, w2 in combinations(uniq, 2):
+            keys.add("ww:" + w1 + "|" + w2)
+    return keys
+
+
+def block_too_big(key: str, size: int, max_block: int = 60) -> bool:
+    """Single words and word pairs shared by more than ``max_block`` items are too generic to block on."""
+    return (size > max_block and (key.startswith("w:") or key.startswith("ww:"))) or size > 4 * max_block
+
+
 def blocking_pairs(items: dict[str, list[NameParts]], max_block: int = 60) -> set[tuple[str, str]]:
     """Candidate pairs sharing a PN core, a PN key, a rare word or a word pair.
 
@@ -565,30 +594,11 @@ def blocking_pairs(items: dict[str, list[NameParts]], max_block: int = 60) -> se
     """
     blocks: dict[str, set[str]] = defaultdict(set)
     for iid, sources in items.items():
-        for np_ in sources:
-            for p in np_.pns:
-                core = pn_core(p)
-                if len(core) >= 4:
-                    blocks["c:" + core].add(iid)
-                    if len(core) >= 5:  # typo-tolerant: one substituted digit or two swapped digits
-                        for k in range(len(core)):
-                            blocks["cd:" + core[:k] + "_" + core[k + 1:]].add(iid)
-                        for k in range(len(core) - 1):
-                            blocks["cs:" + core[:k] + "__" + core[k + 2:]].add(iid)
-            for k in np_.pn_keys:
-                blocks["k:" + k].add(iid)
-            uniq = sorted(set(np_.words))
-            for w in uniq:
-                blocks["w:" + w].add(iid)
-            for w1, w2 in combinations(uniq, 2):
-                blocks["ww:" + w1 + "|" + w2].add(iid)
+        for key in block_keys(sources):
+            blocks[key].add(iid)
     pairs: set[tuple[str, str]] = set()
     for key, ids in blocks.items():
-        if len(ids) < 2:
-            continue
-        if len(ids) > max_block and (key.startswith("w:") or key.startswith("ww:")):
-            continue
-        if len(ids) > 4 * max_block:
+        if len(ids) < 2 or block_too_big(key, len(ids), max_block):
             continue
         for a, b in combinations(sorted(ids), 2):
             pairs.add((a, b))

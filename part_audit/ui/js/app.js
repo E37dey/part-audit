@@ -9,7 +9,7 @@ const PAGES = {
   near: () => import("./pages/near.js"), pair: () => import("./pages/pair.js"), names: () => import("./pages/findings.js"),
   quality: () => import("./pages/findings.js"), erp: () => import("./pages/findings.js"), mapping: () => import("./pages/mapping.js"),
   parts: () => import("./pages/parts.js"), part: () => import("./pages/part.js"), settings: () => import("./pages/settings.js"),
-  guide: () => import("./pages/guide.js"),
+  guide: () => import("./pages/guide.js"), check: () => import("./pages/check.js"),
 };
 // the navigation follows the work: connect the systems, go through the findings, decide
 const NAV = [
@@ -19,7 +19,7 @@ const NAV = [
     ["names", "שמות ומק\"טים", ICON.tag, "name_findings"], ["quality", "איכות נתונים", ICON.check, "quality_issues"],
     ["erp", "ERP מול PDM", ICON.erp, "erp_issues"]]],
   ["3", "החלטה", [["mapping", "מיפוי ואישורים", ICON.map, "pending"]]],
-  [null, [["parts", "חיפוש חלקים", ICON.search]]],
+  ["", "כלים", [["check", "בדיקת חלק חדש", ICON.inspect], ["parts", "חיפוש חלקים", ICON.search]]],
 ];
 export const state = { status: null, summary: null };
 let cleanup = null;
@@ -42,7 +42,7 @@ function shell() {
   app.innerHTML = `<div class="app">
     <aside class="rail">
       <a class="brand" href="#/">${LOGO}<div><b>PartAudit</b><span>בקרת נתונים הנדסיים</span></div></a>
-      <nav class="nav" id="nav">${NAV.map(([n, title, links]) => (n ? `<div class="nav-step"><i>${n}</i>${title}</div>` : "")
+      <nav class="nav" id="nav">${NAV.map(([n, title, links]) => (typeof title === "string" ? `<div class="nav-step">${n ? `<i>${n}</i>` : ""}${title}</div>` : "")
         + (Array.isArray(title) ? title : links).map(navLink).join("")).join("")}
         <div class="nav-sep"></div>
         <a href="#/settings" data-k="settings">${ICON.gear}<span>הגדרות</span></a>

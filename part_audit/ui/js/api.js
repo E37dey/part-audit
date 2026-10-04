@@ -194,6 +194,19 @@ async function staticGet(path, params = {}) {
     if (!x) throw new Error("החלק לא נמצא");
     return x;
   }
+  // pre-release checks: the examples that were run in the app on the demo's sample files
+  if (p === "checks") return staticJson("checks.json");
+  if (p === "checks/samples") return [];
+  if ((m = p.match(/^checks\/([^/]+)\/align$/))) {
+    const x = (await staticJson("align.json"))[`check:${decodeURIComponent(m[1])}|${params.b}`];
+    if (!x) throw new Error("לא נכלל בגרסת ההדגמה המקוונת");
+    return x;
+  }
+  if ((m = p.match(/^checks\/([^/]+)$/))) {
+    const x = (await staticJson("check_details.json"))[decodeURIComponent(m[1])];
+    if (!x) throw new Error("הבדיקה לא נכללה בגרסת ההדגמה המקוונת");
+    return x;
+  }
   if ((m = p.match(/^align\/[^/]+$/))) {
     const x = (await staticJson("align.json"))[`${params.a}|${params.b}`];
     if (!x) throw new Error("לא נכלל בגרסת ההדגמה המקוונת");
@@ -247,6 +260,8 @@ export async function binary(path, params = {}) {
     let m;
     if ((m = path.match(/^\/api\/mesh\/[^/]+\/(.+)$/))) return packed("mesh_index.json", decodeURIComponent(m[1]), "אין תצוגה תלת-ממדית לחלק הזה בגרסה המקוונת");
     if (path.startsWith("/api/compare/")) return packed("compare_index.json", `${params.a}|${params.b}`, "מפת הסטיות לזוג הזה לא נכללה בגרסה המקוונת");
+    if ((m = path.match(/^\/api\/checks\/([^/]+)\/mesh$/))) return packed("mesh_index.json", `check:${decodeURIComponent(m[1])}`, "המודל של הבדיקה לא נכלל בגרסה המקוונת");
+    if ((m = path.match(/^\/api\/checks\/([^/]+)\/compare$/))) return packed("compare_index.json", `check:${decodeURIComponent(m[1])}|${params.b}`, "מפת הסטיות לחלק הזה לא נכללה בגרסה המקוונת");
     throw new Error("לא זמין");
   }
   const url = new URL(path, location.origin);
@@ -257,6 +272,16 @@ export async function binary(path, params = {}) {
 }
 
 export const isStatic = STATIC;
+// pre-release check: the new part's STEP file and what the engineer plans to call it
+export async function uploadCheck(file, fields) {
+  if (STATIC) throw new Error("בגרסה המקוונת אי אפשר להעלות קבצים – הבדיקה רצה באפליקציה המקומית");
+  const fd = new FormData();
+  fd.append("file", file);
+  Object.entries(fields).forEach(([k, v]) => fd.append(k, v || ""));
+  const r = await fetch("/api/checks", { method: "POST", body: fd });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "ההעלאה נכשלה");
+  return r.json();
+}
 export async function upload(file) {
   if (STATIC) throw new Error("העלאת קבצים זמינה באפליקציה המקומית");
   const fd = new FormData();

@@ -3,6 +3,10 @@
     python -m part_audit app [--port 8765] [--workspace DIR]   # the local Hebrew web app (opens the browser)
     python -m part_audit scan DATA_DIR [--erp erp.csv] [--out out/report.xlsx]
     python -m part_audit fingerprint FILE.step        # debug one file
+    python -m part_audit check NEW.step [--pn P] [--name N] [--workspace DIR] [--json]
+        # pre-release check against the app's latest scan; exit code 0 = not found (a new part number may be opened),
+        # 1 = the part already exists or the planned part number is taken, 3 = needs a look (near-identical, mirror,
+        # same shape with another specification, geometry not readable), 2 = cannot check
 """
 from __future__ import annotations
 
@@ -43,6 +47,14 @@ def main(argv: list[str] | None = None) -> int:
     fp = sub.add_parser("fingerprint", help="print the geometry fingerprint of one STEP file")
     fp.add_argument("file")
 
+    ck = sub.add_parser("check", help="pre-release check: is this STEP file already a part of the latest scan?")
+    ck.add_argument("file")
+    ck.add_argument("--pn", default="", help="the part number planned for the new part")
+    ck.add_argument("--name", default="", help="the planned name / description")
+    ck.add_argument("--material", default="")
+    ck.add_argument("--workspace", default=str(Path.home() / "PartAudit"), help="the app's workspace (its latest scan)")
+    ck.add_argument("--json", action="store_true", help="print the whole result as JSON")
+
     ap_app = sub.add_parser("app", help="start the local web app (Hebrew UI) on 127.0.0.1")
     ap_app.add_argument("--port", type=int, default=8765)
     ap_app.add_argument("--host", default="127.0.0.1", help="loopback only (127.0.0.1, localhost, ::1)")
@@ -54,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if args.cmd == "app":
         return run_app(args)
+    if args.cmd == "check":
+        return run_check(args)
     if args.cmd == "fingerprint":
         from .geometry import fingerprint_path
         print(json.dumps(fingerprint_path(args.file), indent=1, default=str))
@@ -91,6 +105,50 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {row['type']:<34} n={row['n_pairs']} tp={row['tp']} fp={row['fp']} P={row['precision']} "
                   f"R={row['recall']} F1={row['f1']} target={row['target']} met={row['met']}")
     return 0
+
+
+def run_check(args) -> int:
+    """Pre-release check from the command line; nothing is stored in the workspace."""
+    import tempfile
+
+    from .decisions import group_targets
+    from .precheck import CheckError, build_index, check_file
+    from .project import ProjectSettings
+    from .server.store import Store
+    if not Path(args.file).is_file():
+        print(f"file not found: {args.file}", file=sys.stderr)
+        return 2
+    store = Store(args.workspace)
+    rid = store.latest_run()
+    if not rid:
+        print(f"no finished scan in {args.workspace} - run a scan in the app first", file=sys.stderr)
+        return 2
+    res = json.loads((store.run_dir(rid) / "result.json").read_text(encoding="utf-8"))
+    st = ProjectSettings.from_dict(res.get("settings") or {})
+    index = build_index(store.run_dir(rid), store.ws / "cache", run_id=rid)
+    with tempfile.TemporaryDirectory(prefix="pa-check-") as own:
+        try:
+            out = check_file(index, args.file, {p["uid"]: p for p in res["parts"]}, pn=args.pn, name=args.name,
+                             material=args.material, th=st.thresholds, cache_dir=store.ws / "cache", own_cache=own,
+                             timeout_s=st.timeout_s, group_targets=group_targets(res, store.current_decisions()))
+        except CheckError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    v = out["verdict"]
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+    else:
+        print(v["title"])
+        print(v["text"])
+        for n in out["notes"]:
+            print("- " + n["text"])
+        for m in out["matches"][:10]:
+            p = m["part"]
+            print(f"  {m['category_he']}: {p['pn'] or '-'} {p['name']} ({p['source']})")
+    bad_note = any(n["tone"] == "bad" for n in out["notes"])
+    if v["kind"] == "exists" or bad_note:
+        return 1
+    return 0 if v["kind"] == "new" else 3
 
 
 def _running_here(url: str) -> bool:

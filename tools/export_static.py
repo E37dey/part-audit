@@ -186,13 +186,24 @@ def main() -> None:
     parts = get("/api/runs/latest/parts", limit=1_000_000)["rows"]
     dump(data / "parts.json", parts)
     dump(data / "part_details.json", {p["uid"]: get(f"/api/runs/latest/parts/{p['uid']}") for p in parts})
-    print(f"json: {len(groups)} groups, {len(pairs)} pairs, {len(parts)} records")
+    # pre-release checks the app ran on the demo's own sample files (the online copy cannot upload files);
+    # a check of any other file stays out of the copy
+    order = [s["key"] for s in get("/api/checks/samples")]
+    checks = sorted((c for c in get("/api/checks") if c["status"] == "done" and c["sample"] in order),
+                    key=lambda c: (order.index(c["sample"]), c["at"]))
+    checks = list({c["sample"]: c for c in checks}.values())          # the latest run of every sample
+    cdet = {c["id"]: get(f"/api/checks/{c['id']}") for c in checks}
+    dump(data / "checks.json", checks)
+    dump(data / "check_details.json", cdet)
+    print(f"json: {len(groups)} groups, {len(pairs)} pairs, {len(parts)} records, {len(checks)} sample checks")
 
     # 3D: every model, the display alignment used by the group and pair pages, and the deviation maps
     meshes = Packer(data, "mesh")
     for p in parts:
         if p["has_step"]:
             meshes.add(p["uid"], pam2(binary(f"/api/mesh/latest/{p['uid']}")))
+    for cid in cdet:
+        meshes.add(f"check:{cid}", pam2(binary(f"/api/checks/{cid}/mesh")))
     meshes.flush()
     dump(data / "mesh_index.json", meshes.index)
     align = {}
@@ -206,6 +217,11 @@ def main() -> None:
         if p["category"] in COMPARE_CATEGORIES and p["has_step"]:
             align[f"{p['a']}|{p['b']}"] = get("/api/align/latest", a=p["a"], b=p["b"])
             compares.add(f"{p['a']}|{p['b']}", pac3(binary("/api/compare/latest", a=p["a"], b=p["b"])))
+    for cid, c in cdet.items():
+        for m in c["matches"]:
+            if m["part"]["has_step"]:
+                align[f"check:{cid}|{m['uid']}"] = get(f"/api/checks/{cid}/align", b=m["uid"])
+                compares.add(f"check:{cid}|{m['uid']}", pac3(binary(f"/api/checks/{cid}/compare", b=m["uid"])))
     compares.flush()
     dump(data / "align.json", align)
     dump(data / "compare_index.json", compares.index)

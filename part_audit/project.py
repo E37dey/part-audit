@@ -105,7 +105,10 @@ def _stub_record(r: PartRecord) -> FileRecord:
                       size=0, mtime=0.0)
 
 
-def build_items(snap: Snapshot, progress: Progress) -> tuple[dict[str, Item], dict[str, PartRecord], dict]:
+def build_items(snap: Snapshot, progress: Progress,
+                known_files: dict[str, FileRecord] | None = None) -> tuple[dict[str, Item], dict[str, PartRecord], dict]:
+    """Items for the comparison engine. ``known_files`` (uid -> FileRecord read by an earlier scan of the same
+    snapshot) saves reading every STEP file again."""
     erp_by_key: dict[str, list[ErpItem]] = defaultdict(list)
     erp_by_core: dict[str, list[ErpItem]] = defaultdict(list)
     for e in snap.erp_items:
@@ -121,7 +124,9 @@ def build_items(snap: Snapshot, progress: Progress) -> tuple[dict[str, Item], di
         if i % 25 == 0:
             progress("read", i / max(len(parts), 1), f"קורא קבצי STEP ({i}/{len(parts)})")
         fr = None
-        if r.step_path and Path(r.step_path).exists():
+        if known_files is not None and r.uid in known_files:
+            fr = known_files[r.uid]
+        elif r.step_path and Path(r.step_path).exists():
             fr = read_step_record(r.step_path, str(Path(r.step_path).parent))
             fr.file_id = r.uid
             if fr.error:
@@ -209,12 +214,16 @@ def _gid(prefix: str, members) -> str:
 
 
 def audit_snapshot(snap: Snapshot, settings: ProjectSettings, cache_dir: str | Path,
-                   progress: Progress | None = None) -> dict:
+                   progress: Progress | None = None, files_out: dict | None = None) -> dict:
+    """``files_out`` (optional) receives the STEP file records read for the parts (uid -> dict), so a later
+    pre-release check can compare a new file with this scan without reading every file again."""
     progress = progress or _noop
     t0 = time.perf_counter()
     timings: dict = {}
     th = settings.thresholds
     items, recs, links = build_items(snap, progress)
+    if files_out is not None:
+        files_out.update({uid: it.rec.to_dict() for uid, it in items.items() if it.rec.path})
     timings["read_s"] = round(time.perf_counter() - t0, 2)
     fps: dict[str, dict] = {}
     shape_fn = None

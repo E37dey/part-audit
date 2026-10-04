@@ -9,6 +9,8 @@
 - **שמות ומק"טים לא עקביים**, ו**בעיות בנתונים**: משקל שלא תואם למודל, חומר חסר, קובץ ביחידות שגויות.
 - **פערים בין ההנדסה ל-ERP**: חלק משוחרר שחסר ב-ERP, ותיאור, חומר, סטטוס או עץ מוצר שונים.
 
+ובנוסף, **בדיקה לפני שחרור**: מהנדס גורר קובץ STEP של חלק חדש ומקבל תוך שניות תשובה אם החלק כבר קיים תחת מק"ט אחר, כך שכפילות חדשה לא נוצרת.
+
 כל הצעה מחכה לאישור של מהנדס, והתוצאה יוצאת לקובץ Excel בעברית. **התוכנה רק קוראת מהמערכות ולא כותבת אליהן.** היא רצה במחשב שלכם ולא שולחת נתונים החוצה.
 
 ## הפעלה
@@ -40,6 +42,8 @@
 | Priority | REST API (OData) |
 | SAP S/4HANA, SAP Business One | OData v2 / Service Layer |
 | כל ERP אחר | קובץ יצוא Excel או CSV |
+
+3. **בדיקת חלק חדש**: לפני שפותחים מק"ט, גוררים את קובץ ה-STEP למסך "בדיקת חלק חדש" (אפשר להוסיף מק"ט מתוכנן, שם וחומר). התשובה: החלק כבר קיים (וגם איזה מק"ט להשתמש בו), קיים חלק כמעט זהה, קיימת גרסת ראי, או שלא נמצא חלק כזה. גם מק"ט מתוכנן שכבר תפוס במערכת כלשהי או ב-ERP מסומן. הבדיקה משווה לסריקה האחרונה באותו מנוע, והקובץ נשאר במחשב.
 
 > **חשוב:** החיבורים נכתבו לפי התיעוד הפומבי של כל יצרן, ונבדקו מול סימולטורים שמחקים את ה-API. הם עוד לא נבדקו מול שרת אמיתי של לקוח. רשימת הפרטים שעוד לא אומתו מופיעה בתוכנה, בכרטיס של כל מערכת.
 
@@ -144,6 +148,13 @@ changed in each source's mapping settings.
   vs part number, released assembly with unreleased or obsolete components, unit errors.
 * ERP vs PDM checks: released but missing in the ERP, active ERP item without a model, description, material,
   status and BOM differences.
+* Pre-release check (`part_audit/precheck.py`): one new STEP file against the latest scan, with the scan's own
+  engine and thresholds (hashes, geometry incl. unit mistakes, aligned surfaces, standard-part spec, names, the
+  planned part number in every record and in the ERP). The answer names the part number to use; if the part is
+  already in a duplicate group, the group's target. The scan keeps the STEP records it read (`files.json`), so a
+  check builds its index without reading the files again. In the app: "בדיקת חלק חדש"; from a script:
+  `python -m part_audit check NEW.step --pn 200-5120 --name "..." [--json]` with exit code 0 (not found), 1 (exists,
+  or the planned part number is taken), 3 (needs a look: near-identical, mirror, other spec), 2 (cannot check).
 
 ### Measured results
 

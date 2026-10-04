@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import traceback
@@ -11,14 +12,14 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__, connectors
 from ..demo import DEMO_DIR, demo_sources
 
-from ..decisions import chosen_target, effective_mapping, group_impact, row_decision
+from ..decisions import chosen_target, effective_mapping, group_impact, group_targets, row_decision
 from ..names import pn_key
 from ..project import ProjectSettings, audit_snapshot, collect
 from .store import Store
@@ -367,10 +368,13 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 st = ProjectSettings.from_dict({"mass_tolerance": cfg["mass_tolerance"], "workers": int(cfg["workers"]),
                                                 "cost_per_pn_year": cfg["cost_per_pn_year"],
                                                 "currency": cfg["currency"], "thresholds": cfg.get("thresholds") or {}})
-                res = audit_snapshot(snap, st, store.ws / "cache", progress=progress)
+                files: dict = {}
+                res = audit_snapshot(snap, st, store.ws / "cache", progress=progress, files_out=files)
                 if should_stop():
                     store.finish_run(rid, "cancelled", None, time.time() - t0)
                     return None
+                # the STEP records read for this scan: a pre-release check compares with them without reading again
+                (store.run_dir(rid) / "files.json").write_text(json.dumps(files, ensure_ascii=False), encoding="utf-8")
                 res["run_id"] = rid
                 res["demo"] = any(s.get("simulated") for s in srcs)
                 (store.run_dir(rid) / "result.json").write_text(json.dumps(res, ensure_ascii=False), encoding="utf-8")
@@ -638,6 +642,207 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             return Response(data, media_type="application/octet-stream")
         data = compare_cache.get(key)
         return Response(data, media_type="application/octet-stream") if data is not None else compare(rid, a, b, mirror)
+
+    # ------------------------------------------------------------------ pre-release check
+    # A new part's STEP file compared with the latest scan before a part number is opened. The file and the answer
+    # stay in the workspace (checks/<id>/); nothing is sent to any system.
+    checks_dir = store.ws / "checks"
+    check_indexes: dict[str, object] = {}
+    index_lock = threading.Lock()
+    max_check_bytes = 200 * 1024 * 1024
+
+    def check_folder(cid: str) -> Path:
+        d = checks_dir / cid
+        if not re.fullmatch(r"C\d{8}-\d{6}-[0-9a-f]{4}", cid) or not (d / "meta.json").exists():
+            raise HTTPException(404, "הבדיקה לא נמצאה")
+        return d
+
+    def check_result(cid: str) -> tuple[Path, dict, dict | None]:
+        d = check_folder(cid)
+        meta = json.loads((d / "meta.json").read_text(encoding="utf-8"))
+        f = d / "result.json"
+        return d, meta, (json.loads(f.read_text(encoding="utf-8")) if f.exists() else None)
+
+    def check_samples() -> dict:
+        f = (factory_dir / "checks" / "checks.json") if demo_available else None
+        if not f or not f.exists():
+            return {}
+        return {s["key"]: s for s in json.loads(f.read_text(encoding="utf-8"))}
+
+    def start_check(cid: str, meta: dict) -> str:
+        def work(progress, should_stop):
+            from ..precheck import CheckError, build_index, check_file
+            d = checks_dir / cid
+            try:
+                rid, res = load_result("latest")
+                with index_lock:
+                    ix = check_indexes.get(rid)
+                    if ix is None:
+                        progress("index", 0.0, "מכין את מאגר החלקים מהסריקה האחרונה (פעם אחת לכל סריקה)")
+                        ix = build_index(store.run_dir(rid), store.ws / "cache", run_id=rid, progress=progress)
+                        check_indexes.clear()
+                        check_indexes[rid] = ix
+                st = ProjectSettings.from_dict(res.get("settings") or {})
+                out = check_file(ix, d / meta["stored"], res["_index"], filename=meta["file"], pn=meta["pn"],
+                                 name=meta["name"], description=meta["description"], material=meta["material"],
+                                 th=st.thresholds, cache_dir=store.ws / "cache", own_cache=d / "fingerprint",
+                                 timeout_s=st.timeout_s, group_targets=group_targets(res, store.current_decisions()),
+                                 progress=progress)
+            except CheckError as exc:
+                out = {"error": str(exc)}
+            except Exception as exc:   # kept with the check, so the page can say what happened
+                out = {"error": f"הבדיקה נכשלה: {type(exc).__name__}: {exc}"}
+            out.update({"id": cid, "at": meta["at"], "sample": meta.get("sample", "")})
+            out.setdefault("file", {"name": meta["file"]})
+            out.setdefault("input", {k: meta[k] for k in ("pn", "name", "description", "material")})
+            (d / "result.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+            progress("done", 1.0, "הבדיקה הסתיימה")
+            return {"check_id": cid, "verdict": (out.get("verdict") or {}).get("kind"), "error": out.get("error")}
+        return jobs.start("check", work)
+
+    def new_check_folder(filename: str, fields: dict, sample: str = "") -> tuple[str, Path, dict]:
+        if not store.latest_run():
+            raise HTTPException(400, "קודם צריך סריקה: הבדיקה משווה את החלק החדש לחלקים שנסרקו")
+        raw = Path(filename or "part.step").name
+        stem, suffix = Path(raw).stem, Path(raw).suffix.lower()
+        if suffix not in (".step", ".stp"):
+            raise HTTPException(400, "אפשר לבדוק קובץ STEP בלבד (.step או .stp)")
+        cid = f"C{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
+        d = checks_dir / cid
+        d.mkdir(parents=True)
+        stored = (re.sub(r"[^\w.\- ]+", "_", stem, flags=re.UNICODE).strip() or "part")[:80] + suffix
+        limits = {"pn": 60, "name": 200, "description": 400, "material": 80}
+        meta = {"id": cid, "at": time.strftime("%Y-%m-%dT%H:%M:%S"), "file": raw, "stored": stored, "sample": sample,
+                **{k: str(fields.get(k) or "").strip()[:n] for k, n in limits.items()}}
+        return cid, d, meta
+
+    def finish_upload(cid: str, d: Path, meta: dict) -> dict:
+        with open(d / meta["stored"], "rb") as fh:
+            head = fh.read(256).lstrip(b"\xef\xbb\xbf \t\r\n")
+        if not head.startswith(b"ISO-10303-21"):
+            shutil.rmtree(d, ignore_errors=True)
+            raise HTTPException(400, "הקובץ אינו קובץ STEP (חסרה הכותרת ISO-10303-21)")
+        (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        return {"check_id": cid, "job_id": start_check(cid, meta)}
+
+    @app.post("/api/checks")
+    async def new_check(file: UploadFile = File(...), pn: str = Form(""), name: str = Form(""),
+                        description: str = Form(""), material: str = Form("")):
+        cid, d, meta = new_check_folder(file.filename or "", {"pn": pn, "name": name, "description": description,
+                                                              "material": material})
+        size = 0
+        with open(d / meta["stored"], "wb") as fh:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > max_check_bytes:
+                    fh.close()
+                    shutil.rmtree(d, ignore_errors=True)
+                    raise HTTPException(413, "הקובץ גדול מדי לבדיקה (עד 200MB)")
+                fh.write(chunk)
+        return finish_upload(cid, d, meta)
+
+    @app.get("/api/checks/samples")
+    def list_check_samples():
+        return [{k: s.get(k, "") for k in ("key", "title", "file", "pn", "name", "material", "expect")}
+                for s in check_samples().values()]
+
+    @app.post("/api/checks/sample/{key}")
+    def sample_check(key: str):
+        s = check_samples().get(key)
+        if not s:
+            raise HTTPException(404, "קובץ הדוגמה לא נמצא")
+        cid, d, meta = new_check_folder(s["file"], s, sample=key)
+        shutil.copyfile(factory_dir / "checks" / Path(s["file"]).name, d / meta["stored"])
+        return finish_upload(cid, d, meta)
+
+    @app.get("/api/checks")
+    def list_checks():
+        out = []
+        for d in sorted((p for p in checks_dir.glob("C*") if (p / "meta.json").exists()), reverse=True)[:100]:
+            _, meta, res = check_result(d.name)
+            v = (res or {}).get("verdict") or {}
+            out.append({"id": meta["id"], "at": meta["at"], "file": meta["file"], "sample": meta.get("sample", ""),
+                        "input": {k: meta[k] for k in ("pn", "name", "description", "material")},
+                        "status": "running" if res is None else ("error" if res.get("error") else "done"),
+                        "error": (res or {}).get("error"), "verdict": {k: v.get(k) for k in ("kind", "tone", "title")},
+                        "use_pn": ((v.get("use") or {}).get("pn")), "n_matches": (res or {}).get("n_matches", 0),
+                        "run_id": (res or {}).get("run_id")})
+        return out
+
+    @app.get("/api/checks/{cid}")
+    def get_check(cid: str):
+        _, meta, res = check_result(cid)
+        if res is None:
+            return {"id": cid, "at": meta["at"], "status": "running", "file": {"name": meta["file"]},
+                    "input": {k: meta[k] for k in ("pn", "name", "description", "material")}}
+        return {**res, "status": "error" if res.get("error") else "done"}
+
+    @app.delete("/api/checks/{cid}")
+    def delete_check(cid: str):
+        d = check_folder(cid)
+        if jobs.running("check"):
+            raise HTTPException(409, "בדיקה רצה כרגע – נסו שוב בעוד רגע")
+        shutil.rmtree(d, ignore_errors=True)
+        return {"ok": True}
+
+    def check_match(cid: str, b: str) -> tuple[Path, dict, dict, dict]:
+        d, meta, res = check_result(cid)
+        if not res or res.get("error"):
+            raise HTTPException(404, "לבדיקה הזו אין תוצאה")
+        m = next((x for x in res.get("matches", []) if x["uid"] == b), None)
+        if m is None:
+            raise HTTPException(404, "החלק לא נמצא בין ההתאמות של הבדיקה")
+        return d, meta, res, m
+
+    @app.get("/api/checks/{cid}/mesh")
+    def check_mesh(cid: str):
+        d, meta, _ = check_result(cid)
+        try:
+            data = meshes.get_bytes(str(d / meta["stored"]))
+        except Exception as exc:
+            raise HTTPException(500, f"לא ניתן להכין תצוגה תלת-ממדית: {exc}")
+        return Response(data, media_type="application/octet-stream", headers={"Cache-Control": "max-age=3600"})
+
+    @app.get("/api/checks/{cid}/align")
+    def check_align(cid: str, b: str):
+        """Rotation that shows the existing part b in the orientation of the new file (display only)."""
+        d, meta, res, m = check_match(cid, b)
+        key = ("check", cid, b)
+        if key not in align_cache:
+            scale = (m.get("metrics") or {}).get("scale") or 1.0
+            try:
+                al = align_meshes(meshes.get(str(d / meta["stored"])), meshes.get(step_path(res["run_id"], b)),
+                                  scale_b=scale, proper_only=True)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(500, f"היישור נכשל: {exc}")
+            with cache_lock:
+                if len(align_cache) > 512:
+                    align_cache.clear()
+                align_cache[key] = {"matrix": al["matrix"], "mirror": al["mirror"], "scale": scale}
+        return align_cache[key]
+
+    @app.get("/api/checks/{cid}/compare")
+    def check_compare(cid: str, b: str):
+        d, meta, res, m = check_match(cid, b)
+        key = ("check", cid, b)
+        data = compare_cache.get(key)
+        if data is None:
+            scale = (m.get("metrics") or {}).get("scale") or 1.0
+            try:
+                c = compare_meshes(meshes.get(str(d / meta["stored"])), meshes.get(step_path(res["run_id"], b)),
+                                   scale_b=scale, mirror=m.get("geo_relation") == "mirror")
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(500, f"ההשוואה נכשלה: {exc}")
+            data = compare_bytes(c)
+            with cache_lock:
+                if len(compare_cache) > 24:
+                    compare_cache.clear()
+                compare_cache[key] = data
+        return Response(data, media_type="application/octet-stream")
 
     # ------------------------------------------------------------------ decisions + export
     @app.post("/api/decisions")

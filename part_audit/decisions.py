@@ -21,6 +21,20 @@ def chosen_target(group: dict, decision: dict | None, parts: dict) -> str:
     return group["master_uid"]
 
 
+def group_targets(res: dict, decisions: dict) -> dict[str, dict]:
+    """For every duplicate group, the record whose part number stays (the approved one, else the proposal)."""
+    parts = {p["uid"]: p for p in res["parts"]}
+    out = {}
+    for g in res["groups"]:
+        d = decisions.get(f"group:{g['id']}")
+        t = parts.get(chosen_target(g, d, parts))
+        if t:
+            out[g["id"]] = {"uid": t["uid"], "pn": t["pn"], "name": t["name"], "source": t["source"],
+                            "source_kind": t["source_kind"], "approved": bool(d and d.get("decision") == "approve"),
+                            "pns": g["pns"], "group_id": g["id"]}
+    return out
+
+
 def effective_mapping(res: dict, decisions: dict) -> list[dict]:
     """Mapping rows after the engineer's choices.
 

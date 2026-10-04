@@ -1,8 +1,8 @@
 // Two parts compared: side by side, deviation heat map (where exactly they differ) and an aligned overlay.
 import { get, binary } from "../api.js";
-import { esc, pct, mm, datetime, pnChip, sysBadge, catPill, confBar, uidLink, DECISION } from "../util.js";
+import { esc, pct, datetime, pnChip, sysBadge, catPill, confBar, uidLink, DECISION } from "../util.js";
 import { decisionBar } from "../ui.js";
-import { Viewer, parseMesh, parseCompare, linkViewers } from "../viewer3d.js";
+import { compare3d } from "../compare3d.js";
 import { attrTable } from "../compare.js";
 
 const LABELS = {
@@ -37,11 +37,9 @@ export async function render({ el, param, setTitle, refreshStatus }) {
     </div></section>
 
     <section class="panel"><div class="panel-h"><h2>השוואה בתלת-ממד</h2><span class="spacer"></span>
-        <div class="seg" id="mode"><button data-v="side" class="on">זה לצד זה</button><button data-v="heat">מפת סטיות</button><button data-v="overlay">חפיפה</button></div></div>
-      <div class="panel-b stack">
-        ${both ? `<div class="viewers" id="two"><div id="va"></div><div id="vb"></div></div>
-          <div id="one" hidden><div id="vo" style="aspect-ratio:16/9"></div></div>
-          <div id="stats" class="small"></div>`
+        ${both ? '<div class="seg" id="mode"></div>' : ""}</div>
+      <div class="panel-b stack" id="c3">
+        ${both ? ""
           : `<div class="empty">${!a.has_step && !b.has_step ? "לשני החלקים" : !a.has_step ? "לחלק א" : "לחלק ב"} אין קובץ STEP – אין השוואה תלת-ממדית.</div>`}
       </div></section>
 
@@ -62,62 +60,17 @@ export async function render({ el, param, setTitle, refreshStatus }) {
   paint(p);
   if (!both) return null;
 
-  const va = new Viewer(el.querySelector("#va"), { label: `<span class="small muted">א</span> ${pnChip(a.pn)} ${sysBadge(a.source_kind, "")}` });
-  const vb = new Viewer(el.querySelector("#vb"), { label: `<span class="small muted">ב</span> ${pnChip(b.pn)} ${sysBadge(b.source_kind, "")}` });
-  linkViewers([va, vb]);
-  let vo = null;
-  const [ma, mb] = await Promise.all([
-    binary(`/api/mesh/latest/${encodeURIComponent(a.uid)}`).then(parseMesh).catch((e) => { va.msg.textContent = e.message; return null; }),
-    binary(`/api/mesh/latest/${encodeURIComponent(b.uid)}`).then(parseMesh).catch((e) => { vb.msg.textContent = e.message; return null; }),
-  ]);
-  if (ma) va.setMesh(ma);
-  if (mb) vb.setMesh(mb);
-  if (ma && mb) get("/api/align/latest", { a: a.uid, b: b.uid }).then((al) => vb.orient(al.matrix)).catch(() => {});
-  let cmp = null;
-  const loadCompare = async () => {
-    if (cmp) return cmp;
-    el.querySelector("#stats").innerHTML = '<span class="muted">מיישר את החלקים ומחשב מרחקים…</span>';
-    cmp = parseCompare(await binary("/api/compare/latest", { a: a.uid, b: b.uid }));
-    return cmp;
-  };
-  const diag = (mesh) => Math.hypot(mesh.bbox[3] - mesh.bbox[0], mesh.bbox[4] - mesh.bbox[1], mesh.bbox[5] - mesh.bbox[2]);
-  const setMode = async (mode) => {
-    el.querySelector("#two").hidden = mode === "overlay";
-    el.querySelector("#one").hidden = mode !== "overlay";
-    const stats = el.querySelector("#stats");
-    if (mode === "side") {
-      if (ma) { va.setSurface(ma.pos, ma.idx); va.plain(); }
-      if (mb) { vb.setSurface(mb.pos, mb.idx); vb.plain(); }
-      stats.innerHTML = ""; return;
-    }
-    if (!ma || !mb) return;
-    let c;
-    try { c = await loadCompare(); } catch (e) { stats.innerHTML = `<div class="callout warn">${esc(e.message)}</div>`; return; }
-    // small distances are the faceting of the display mesh, not a real difference: below max(3 x median distance,
-    // 0.05% of the part size, 0.01 mm) the surface is shown as matching
-    const floor = Math.max(3 * c.median, 0.0005 * Math.max(diag(ma), diag(mb)), 0.01);
-    const scale = Math.max(c.max, floor * 4);
-    if (mode === "heat") {
-      const adj = (dev) => Float32Array.from(dev, (x) => Math.max(0, x - floor));
-      va.setSurface(c.A.pos, c.A.idx); va.heatmap(adj(c.A.dev), scale - floor);
-      vb.setSurface(c.B.pos, c.B.idx); vb.heatmap(adj(c.B.dev), scale - floor);
-    } else {
-      if (!vo) { vo = new Viewer(el.querySelector("#vo"), { label: `<span class="pill neutral plain">אפור = א</span> <span class="pill brass plain">זהב שקוף = ב, מיושר על א</span>` }); vo.setMesh(ma); vo.addOverlay(mb, c.matrix); }
-      else vo.resize();
-    }
-    const same = c.max <= floor * 1.5;
-    stats.innerHTML = `<div class="row" style="gap:18px">
-      ${mode === "heat" ? `<div class="legend"><span>0</span><span class="bar"></span><span class="ltr">${mm(scale)}</span></div>` : ""}
-      <span>סטייה מקסימלית <b class="num">${mm(c.max)}</b></span><span>95% מהשטח בתוך <b class="num">${mm(c.p95)}</b></span>
-      <span>חציון <b class="num">${mm(c.median)}</b></span>${c.mirror ? '<span class="pill info">יושר כתמונת ראי</span>' : ""}</div>
-      <p class="muted" style="margin-top:6px">${same ? "לא נמצא הבדל מעבר לדיוק התצוגה – הצורות זהות." : "האזורים האדומים הם המקומות שבהם החלקים שונים."}
-        הבדלים קטנים מ-${mm(floor)} לא נצבעים, כי זה דיוק רשת התצוגה. המנוע עצמו משווה את המודל המדויק.</p>`;
-  };
-  const seg = el.querySelector("#mode");
-  seg.querySelectorAll("button").forEach((btn) => (btn.onclick = () => {
-    seg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === btn));
-    setMode(btn.dataset.v);
-  }));
-  if (p.category === "near_identical" || p.category === "mirror") seg.querySelector('[data-v="heat"]').click();
-  return () => { va.dispose(); vb.dispose(); if (vo) vo.dispose(); };
+  const near = p.category === "near_identical" || p.category === "mirror";
+  return compare3d(el.querySelector("#c3"), {
+    labelA: `<span class="small muted">א</span> ${pnChip(a.pn)} ${sysBadge(a.source_kind, "")}`,
+    labelB: `<span class="small muted">ב</span> ${pnChip(b.pn)} ${sysBadge(b.source_kind, "")}`,
+    overlayLabel: `<span class="pill neutral plain">אפור = א</span> <span class="pill brass plain">זהב שקוף = ב, מיושר על א</span>`,
+    seg: el.querySelector("#mode"), initial: near ? "heat" : "side",
+    load: {
+      meshA: () => binary(`/api/mesh/latest/${encodeURIComponent(a.uid)}`),
+      meshB: () => binary(`/api/mesh/latest/${encodeURIComponent(b.uid)}`),
+      align: () => get("/api/align/latest", { a: a.uid, b: b.uid }),
+      compare: () => binary("/api/compare/latest", { a: a.uid, b: b.uid }),
+    },
+  });
 }
