@@ -10,15 +10,16 @@ const ROLE_CARDS = [["viewer", "צפייה", "רואה את כל המסכים, �
   ["engineer", "מהנדס", "גם מחליט על כפילויות ועל ממצאים, מריץ סריקה ובודק חלק חדש."],
   ["admin", "מנהל", "גם מחבר מקורות נתונים, משנה הגדרות ומנהל משתמשים."]];
 
-function userRows(users) {
+function userRows(users, sso = false) {
   if (!users.length) return '<tr><td colspan="6"><div class="empty">עדיין אין משתמשים</div></td></tr>';
-  return users.map((u) => `<tr data-u="${u.id}" class="${u.disabled ? "muted" : ""}">
+  return users.map((u) => `<tr data-u="${u.id}" data-mail="${esc(u.email || (u.username.includes("@") ? u.username : ""))}" class="${u.disabled ? "muted" : ""}">
     <td><b>${esc(u.display_name)}</b><div class="small muted"><span class="ltr">${esc(u.username)}</span></div></td>
     <td><select data-role aria-label="הרשאה" ${isStatic ? "disabled" : ""}>${ROLE_CARDS.map(([v, l]) => `<option value="${v}" ${u.role === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
     <td class="small">${[u.password ? "סיסמה" : "", u.company ? "חשבון החברה" : ""].filter(Boolean).join(" + ") || "—"}</td>
     <td class="small nowrap">${u.last_login ? datetime(u.last_login) : '<span class="muted">עוד לא נכנס</span>'}</td>
     <td>${u.disabled ? '<span class="pill bad plain">מושבת</span>' : '<span class="pill ok plain">פעיל</span>'}</td>
-    <td class="nowrap"><button class="btn small ghost" data-act="pw" type="button">סיסמה חדשה</button>
+    <td class="nowrap">${u.password ? '<button class="btn small ghost" data-act="pw" type="button">סיסמה חדשה</button>' : ""}
+      ${sso && u.password ? '<button class="btn small ghost" data-act="company" type="button" title="מעכשיו ייכנס רק עם חשבון החברה">לחשבון החברה</button>' : ""}
       <button class="btn small ghost" data-act="${u.disabled ? "enable" : "disable"}" type="button">${u.disabled ? "הפעלה" : "השבתה"}</button></td></tr>`).join("");
 }
 
@@ -35,13 +36,17 @@ function teamPanels(s, users) {
           <li>מפעילים את <b>שרת הצוות</b> במחשב שיהיה השרת: "PartAudit – שרת צוות" בתפריט התחל, או הפקודה <span class="mono ltr">python -m part_audit serve</span>.</li>
           <li>כל אחד פותח בדפדפן את הכתובת שהשרת מציג ונכנס עם המשתמש שלו.</li></ol></div>`}
         <div class="table-wrap"><table class="t" id="users"><thead><tr><th>משתמש</th><th>הרשאה</th><th>כניסה עם</th><th>כניסה אחרונה</th><th>מצב</th><th></th></tr></thead>
-          <tbody>${isStatic ? '<tr><td colspan="6"><div class="empty">בגרסה המקוונת אין משתמשים. באפליקציה מוסיפים אותם כאן.</div></td></tr>' : userRows(users)}</tbody></table></div>
+          <tbody>${isStatic ? '<tr><td colspan="6"><div class="empty">בגרסה המקוונת אין משתמשים. באפליקציה מוסיפים אותם כאן.</div></td></tr>' : userRows(users, !!oc.enabled)}</tbody></table></div>
         <form class="form" id="add-user" autocomplete="off">
           <div class="field"><label for="nu-name">שם משתמש לכניסה</label><input id="nu-name" dir="auto" maxlength="64" placeholder="למשל: dana.levi"></div>
           <div class="field"><label for="nu-disp">שם מלא (יופיע ליד החלטות)</label><input id="nu-disp" maxlength="120" placeholder="למשל: דנה לוי"></div>
           <div class="field"><label for="nu-role">הרשאה</label><select id="nu-role">${ROLE_CARDS.map(([v, l]) => `<option value="${v}" ${v === "engineer" ? "selected" : ""}>${l}</option>`).join("")}</select></div>
-          <div class="field"><label for="nu-pw">סיסמה ראשונית</label><input id="nu-pw" type="password" dir="ltr" autocomplete="new-password">
+          <div class="field"><label for="nu-how">כניסה עם</label><select id="nu-how"><option value="password">סיסמה</option>
+            <option value="company" ${oc.enabled ? "" : "disabled"}>חשבון החברה${oc.enabled ? "" : " (כשהאפשרות פעילה)"}</option></select></div>
+          <div class="field" id="nu-pw-f"><label for="nu-pw">סיסמה ראשונית</label><input id="nu-pw" type="password" dir="ltr" autocomplete="new-password">
             <span class="help">לפחות 8 תווים. המשתמש יכול להחליף אותה אחרי הכניסה.</span></div>
+          <div class="field" id="nu-mail-f" hidden><label for="nu-mail">המייל בחשבון החברה</label><input id="nu-mail" type="email" dir="ltr" placeholder="dana@company.co.il">
+            <span class="help">בכניסה הראשונה עם חשבון החברה המשתמש יקושר לפי המייל הזה.</span></div>
           <div class="field full"><button class="btn" type="submit" style="align-self:flex-start">+ הוספת משתמש</button></div>
         </form>
       </div></section>
@@ -195,18 +200,23 @@ export async function render({ el, setTitle, refreshStatus, state }) {
 }
 
 function wireTeam(el, save, refreshStatus) {
+  const sso = !!el.querySelector("#oc-on")?.checked;
   const reload = async () => {
     const t = await get("/api/users");
-    el.querySelector("#users tbody").innerHTML = userRows(t.users);
+    el.querySelector("#users tbody").innerHTML = userRows(t.users, sso);
   };
+  const how = el.querySelector("#nu-how");
+  how.onchange = () => { el.querySelector("#nu-pw-f").hidden = how.value === "company"; el.querySelector("#nu-mail-f").hidden = how.value !== "company"; };
   el.querySelector("#add-user").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (isStatic) { toast("ניהול משתמשים זמין באפליקציה"); return; }
     const v = (id) => el.querySelector(id).value.trim();
     try {
-      await send("POST", "/api/users", { username: v("#nu-name"), display_name: v("#nu-disp"), role: v("#nu-role"), password: el.querySelector("#nu-pw").value });
-      toast(`המשתמש ${v("#nu-name")} נוסף`);
-      ["#nu-name", "#nu-disp", "#nu-pw"].forEach((id) => (el.querySelector(id).value = ""));
+      const company = how.value === "company";
+      await send("POST", "/api/users", { username: v("#nu-name") || v("#nu-mail"), display_name: v("#nu-disp"), role: v("#nu-role"),
+        ...(company ? { company: true, email: v("#nu-mail") } : { password: el.querySelector("#nu-pw").value }) });
+      toast(`המשתמש ${v("#nu-name") || v("#nu-mail")} נוסף`);
+      ["#nu-name", "#nu-disp", "#nu-pw", "#nu-mail"].forEach((id) => (el.querySelector(id).value = ""));
       await reload();
     } catch (err) { toast(err.message, true); }
   });
@@ -228,6 +238,18 @@ function wireTeam(el, save, refreshStatus) {
         actions: [{ label: "שמירה", kind: "primary", onClick: async (body) => {
           try { await send("PUT", `/api/users/${id}`, { password: body.querySelector("#rp").value }); toast("הסיסמה הוחלפה"); }
           catch (err) { toast(err.message, true); return true; }
+          return false;
+        } }, { label: "ביטול" }] });
+      return;
+    }
+    if (b.dataset.act === "company") {
+      modal({ title: "מעבר לכניסה עם חשבון החברה", body: `<p>מעכשיו המשתמש ייכנס רק עם חשבון החברה, והסיסמה שלו תימחק. בכניסה הראשונה הוא יקושר לפי המייל.</p>
+          <div class="form one"><div class="field"><label for="cm">המייל בחשבון החברה</label><input id="cm" type="email" dir="ltr"
+          value="${esc(b.closest("tr").dataset.mail || "")}"></div></div>`,
+        actions: [{ label: "מעבר", kind: "primary", onClick: async (body) => {
+          try { await send("PUT", `/api/users/${id}`, { company_only: true, email: body.querySelector("#cm").value.trim() }); toast("המשתמש יעבור לחשבון החברה בכניסה הבאה"); }
+          catch (err) { toast(err.message, true); return true; }
+          await reload();
           return false;
         } }, { label: "ביטול" }] });
       return;

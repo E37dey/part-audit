@@ -32,6 +32,7 @@ UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 LOOPBACK_IPS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 RUN_ID = re.compile(r"\d{8}-\d{6}-[0-9a-f]{4}")
+EMAIL = re.compile(r"[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}")
 
 
 def _host_name(host_header: str) -> str:
@@ -538,12 +539,23 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             raise HTTPException(400, "כבר יש משתמש בשם הזה")
         if body.get("role") not in ROLES:
             raise HTTPException(400, "הרשאה לא מוכרת")
-        pw = str(body.get("password") or "")
-        problem = password_problem(pw, name)
-        if problem:
-            raise HTTPException(400, problem)
-        u = store.add_user(name, body["role"], display_name=str(body.get("display_name") or "")[:120],
-                           email=str(body.get("email") or "")[:200], pw_hash=await run_in_threadpool(hash_password, pw))
+        email = str(body.get("email") or "").strip().lower()[:200]
+        if body.get("company"):
+            # signs in only with the company account: linked at the first company sign-in with this e-mail
+            email = email or name.lower()
+            if not EMAIL.fullmatch(email):
+                raise HTTPException(400, "למשתמש של חשבון החברה צריך כתובת מייל")
+            if store.find_user(email) and email != name.lower():
+                raise HTTPException(400, "כבר יש משתמש עם המייל הזה")
+            pw_hash = None
+        else:
+            pw = str(body.get("password") or "")
+            problem = password_problem(pw, name)
+            if problem:
+                raise HTTPException(400, problem)
+            pw_hash = await run_in_threadpool(hash_password, pw)
+        u = store.add_user(name, body["role"], display_name=str(body.get("display_name") or "")[:120], email=email,
+                           pw_hash=pw_hash)
         return public_user(u)
 
     @app.put("/api/users/{uid}")
@@ -564,7 +576,16 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         if "disabled" in body:
             fields["disabled"] = 1 if body["disabled"] else 0
         keep_an_admin(u, fields.get("role"), bool(fields.get("disabled")))
-        if body.get("password"):
+        if body.get("company_only") and u.get("pw_hash"):
+            # from now on only the company account: the password goes, the account is linked at the next company
+            # sign-in with its e-mail
+            email = (fields.get("email") or u.get("email") or u["username"]).lower()
+            if not EMAIL.fullmatch(email):
+                raise HTTPException(400, "קודם צריך לשמור למשתמש כתובת מייל")
+            if u["role"] == "admin" and not u.get("oidc_sub") and store.count_admins(except_id=u["id"]) == 0:
+                raise HTTPException(400, "חייב להישאר לפחות מנהל אחד שיכול להיכנס")
+            fields.update(pw_hash=None, email=email)
+        elif body.get("password"):
             problem = password_problem(str(body["password"]), u["username"])
             if problem:
                 raise HTTPException(400, problem)

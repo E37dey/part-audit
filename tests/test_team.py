@@ -514,3 +514,27 @@ def test_path_variants_do_not_skip_the_sign_in(team):
     for path in ("/api/users", "/api/%75sers", "/api/users/", "/api/settings", "/api/auth/me/../../users"):
         assert c.get(path).status_code in (401, 404, 307), path
     assert c.get("//api/users").status_code == 404 and c.get("/API/users").status_code == 404
+
+
+def test_admin_moves_a_user_to_company_sign_in(team, key, monkeypatch):
+    c, st = team
+    idp = FakeProvider(key)
+    monkeypatch.setattr(oidc, "http_json", idp.http_json)
+    _login(c, "admin")
+    c.put("/api/settings", json={"oidc": {"enabled": True, "issuer": "https://idp.example.com", "client_id": "partaudit",
+                                          "client_secret": "s3cret", "auto_create": False}})
+    eng = st.find_user("eng")
+    assert c.put(f"/api/users/{eng['id']}", json={"company_only": True}).status_code == 400      # no e-mail yet
+    r = c.put(f"/api/users/{eng['id']}", json={"company_only": True, "email": "Dana@Factory.co.il"})
+    assert r.status_code == 200 and r.json()["password"] is False and r.json()["email"] == "dana@factory.co.il"
+    admin = st.find_user("admin")
+    assert c.put(f"/api/users/{admin['id']}", json={"company_only": True, "email": "a@factory.co.il"}).status_code == 400
+    # a new account for company sign-in only
+    r = c.post("/api/users", json={"username": "yossi@factory.co.il", "role": "viewer", "company": True})
+    assert r.status_code == 200 and r.json()["password"] is False
+    assert c.post("/api/users", json={"username": "noam", "role": "viewer", "company": True}).status_code == 400
+    c.post("/api/auth/logout")
+    assert c.post("/api/auth/login", json={"username": "eng", "password": "eng-Passw0rd"}).status_code == 401
+    r, _ = idp.sign_in(c, sub="eng-sub", email="dana@factory.co.il", email_verified=True)
+    me = c.get("/api/auth/me").json()["user"]
+    assert r.headers["location"] == "/" and me["username"] == "eng" and me["role"] == "engineer" and me["company"]
