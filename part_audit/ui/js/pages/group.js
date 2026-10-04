@@ -1,6 +1,6 @@
 // One duplicate group: the parts side by side in 3D, their attributes, the impact of merging, the evidence and the decision.
 import { get } from "../api.js";
-import { esc, n0, money, datetime, sysBadge, pnChip, groupPill, catPill, confBar, uidLink, DECISION } from "../util.js";
+import { esc, n0, money, datetime, sysBadge, pnChip, groupPill, catPill, confBar, uidLink, DECISION, ICON } from "../util.js";
 import { decisionBar } from "../ui.js";
 import { Viewer, linkViewers } from "../viewer3d.js";
 import { attrTable } from "../compare.js";
@@ -8,8 +8,13 @@ import { attrTable } from "../compare.js";
 const MAX_VIEWERS = 6;
 
 export async function render({ el, param, setTitle, refreshStatus }) {
-  const g = await get(`/api/runs/latest/groups/${encodeURIComponent(param)}`);
+  const [g, list] = await Promise.all([get(`/api/runs/latest/groups/${encodeURIComponent(param)}`), get("/api/runs/latest/groups")]);
   const cur = g.currency || "ILS";
+  // review order = the list's default order (most stock on duplicate part numbers first)
+  const order = [...list].sort((x, y) => (y.redundant_stock_value || 0) - (x.redundant_stock_value || 0));
+  const at = order.findIndex((x) => x.id === g.id);
+  const prev = at > 0 ? order[at - 1] : null, next = at >= 0 && at < order.length - 1 ? order[at + 1] : null;
+  const nextPending = () => { for (let k = 1; k < order.length; k++) { const x = order[(at + k) % order.length]; if (!x.decision && x.id !== g.id) return x; } return null; };
   const master = g.decision_master || g.master_uid;
   // proposed part first, then by system (plain code-point order, the same order the static export uses)
   const parts = [...g.parts].sort((a, b) => (a.uid === g.master_uid ? -1 : b.uid === g.master_uid ? 1 : (a.source > b.source) - (a.source < b.source)));
@@ -21,7 +26,10 @@ export async function render({ el, param, setTitle, refreshStatus }) {
     <section class="panel"><div class="panel-b stack" style="gap:12px">
       <div class="row">${groupPill(g.category)}${g.cross_source ? '<span class="pill info">חוצה מערכות</span>' : ""}
         <span class="small muted">${n0(parts.length)} רשומות · ${n0(g.pns.length)} מק"טים · ציון ביטחון ${confBar(g.confidence)}</span>
-        <span class="spacer" style="flex:1"></span><span id="dec-pill"></span></div>
+        <span class="spacer" style="flex:1"></span><span id="dec-pill"></span>
+        <span class="pager">${prev ? `<a class="btn small ghost" href="#/group/${prev.id}" title="הקבוצה הקודמת ברשימה">${ICON.prev}הקודמת</a>` : ""}
+          <span class="small muted num">${at + 1} מתוך ${order.length}</span>
+          ${next ? `<a class="btn small ghost" href="#/group/${next.id}" title="הקבוצה הבאה ברשימה">הבאה${ICON.next}</a>` : ""}</span></div>
       <p><b>למה זה אותו חלק:</b> ${esc(g.reason_he || "—")}</p>
       <p><b>המק"ט המוצע להישאר:</b> ${pnChip(g.master_pn, true)} <span class="muted">(${esc(g.master_reason_he)})</span><span id="chosen"></span></p>
       <div class="row small">${g.pns.map((p) => pnChip(p, p === g.master_pn)).join(" ")}</div>
@@ -35,7 +43,7 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       </div></section>
 
     <section class="panel"><div class="panel-h"><h2>החלטה</h2><span class="sub">אישור מסמן את המק"טים האחרים להחלפה במק"ט היעד. שום דבר לא נכתב למערכות – הביצוע לפי קובץ ה-Excel.</span></div>
-      <div class="panel-b stack"><div id="decision"></div><div id="history"></div></div></section>
+      <div class="panel-b stack"><div id="decision"></div><div class="row" id="after"></div><div id="history"></div></div></section>
 
     <section class="panel"><div class="panel-h"><h2>השוואת נתונים</h2><span class="sub">העמודה הראשונה היא המק"ט המוצע</span></div>
       <div class="panel-b">${attrTable(parts, (p) => `${pnChip(p.pn, p.uid === g.master_uid)}<div style="margin-top:4px">${sysBadge(p.source_kind, "")} ${uidLink(p.uid, "לכרטיס החלק")}</div>`, { masterUid: g.master_uid })}</div></section>
@@ -43,10 +51,10 @@ export async function render({ el, param, setTitle, refreshStatus }) {
     <section class="grid grid-2">
       <div class="panel"><div class="panel-h"><h2>מה ישתנה אם מאחדים</h2></div>
         <div class="panel-b stack">
-          <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-            <div class="kpi"><span class="label">מק"טים שיבוטלו</span><span class="value" id="k-red"></span></div>
-            <div class="kpi"><span class="label">שורות עץ מוצר לעדכון</span><span class="value" id="k-bom"></span></div>
-            <div class="kpi"><span class="label">מלאי במק"טים הכפולים</span><span class="value" id="k-val" style="font-size:1.4rem"></span></div>
+          <div class="readout mini" style="--cells:3">
+            <div class="cell"><span class="r-label">מק"טים שיבוטלו</span><span class="r-value" id="k-red"></span></div>
+            <div class="cell"><span class="r-label">שורות עץ מוצר לעדכון</span><span class="r-value" id="k-bom"></span></div>
+            <div class="cell"><span class="r-label">מלאי במק"טים הכפולים</span><span class="r-value" id="k-val"></span></div>
           </div>
           ${g.products?.length ? `<div><b class="small">מוצרים שמשתמשים בחלק:</b> ${g.products.map((x) => `<span class="chip">${esc(x)}</span>`).join(" ")}</div>` : ""}
         </div>
@@ -72,7 +80,7 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       </tbody></table></div></section>`;
 
   // decision + history (re-rendered after saving without reloading the 3D views)
-  const paint = (d) => {
+  const paint = (d, saved = false) => {
     const [he, tone] = DECISION[d.decision || ""] || DECISION[""];
     el.querySelector("#dec-pill").innerHTML = `<span class="pill ${tone}">${he}</span>`;
     // an approved target replaces the proposal; a target picked with "review" is shown but changes nothing yet
@@ -88,8 +96,16 @@ export async function render({ el, param, setTitle, refreshStatus }) {
       type: "group", id: g.id, current: d.decision, note: d.decision_note, by: d.decision_by, at: d.decision_at,
       masterChoices: parts.filter((p) => p.pn).map((p) => ({ value: p.uid, label: `${p.pn} · ${p.source}` })),
       master: d.decision_master || master, labels: { approve: "אשר איחוד", reject: "לא אותו חלק", review: "לבדיקה" },
-      onSaved: async () => { const fresh = await get(`/api/runs/latest/groups/${encodeURIComponent(g.id)}`); paint(fresh); refreshStatus(); },
+      onSaved: async () => {
+        const fresh = await get(`/api/runs/latest/groups/${encodeURIComponent(g.id)}`);
+        paint(fresh, true); refreshStatus();
+      },
     });
+    // the way on: after a decision, the next group that still waits
+    const np = nextPending();
+    el.querySelector("#after").innerHTML = np ? `<a class="btn ${saved ? "primary" : "ghost"}" id="go-next" href="#/group/${np.id}">לקבוצה הבאה שממתינה${ICON.next}</a>
+      <span class="small muted">${esc(np.name || np.master_pn || "")}</span>` : (saved ? '<span class="small muted">אין עוד קבוצות שממתינות להחלטה.</span>' : "");
+    if (saved) el.querySelector("#go-next")?.focus();
     el.querySelector("#history").innerHTML = d.history?.length ? `<details><summary class="small">היסטוריית החלטות (${d.history.length})</summary>
       <table class="t" style="margin-top:8px"><thead><tr><th>מתי</th><th>מי</th><th>החלטה</th><th>מק"ט יעד</th><th>הערה</th></tr></thead><tbody>
       ${d.history.map((h) => `<tr><td class="nowrap">${datetime(h.created)}</td><td>${esc(h.user)}</td><td>${(DECISION[h.decision] || [h.decision])[0]}</td>
