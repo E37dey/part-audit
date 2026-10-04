@@ -9,8 +9,8 @@ All data is synthetic or public: accuracy is an upper bound for real factory dat
 API simulators (SOLIDWORKS PDM Web API, Vault, Windchill, Teamcenter, a legacy folder, Priority), runs the audit and
 compares the result with what the factory builder planted (`demo/factory/factory.json`, `truth`). The factory has
 472 parts, 29 assemblies and 434 ERP items; business data is synthetic, standard-part
-geometry follows ISO/DIN dimensions, and 5 NIST test models are included. Time: 4.5 s reading,
-40.3 s audit (2 workers on a 2-vCPU VM, cold cache; a repeat scan reuses the cached geometry).
+geometry follows ISO/DIN dimensions, and 5 NIST test models are included. Time: 4.7 s reading,
+40.1 s audit (2 workers on a 2-vCPU VM, cold cache; a repeat scan reuses the cached geometry).
 
 **Duplicate pairs** (pairs of records that are the same part): 318 true, 297 predicted,
 **297 correct, 0 wrong, 21 missed: precision 100.0%, recall 93.4%**.

@@ -1,25 +1,25 @@
 {
  "what": "v2 pipeline on the synthetic demo factory, via real connectors against local simulators",
  "seconds": {
-  "collect": 4.5,
-  "audit": 40.3
+  "collect": 4.7,
+  "audit": 40.1
  },
  "timings": {
-  "read_s": 9.77,
-  "geometry_s": 18.89,
+  "read_s": 9.52,
+  "geometry_s": 19.07,
   "geometry_files": 423,
   "geometry_unique": 416,
   "geometry_cached": 0,
   "geometry_computed": 416,
-  "geometry_wall_s": 18.883503285000188,
-  "geometry_per_file_mean_s": 0.08922941943269681,
-  "geometry_per_file_median_s": 0.040514336000342155,
-  "geometry_per_file_p90_s": 0.08153590700021596,
-  "geometry_per_file_max_s": 2.2966644350017305,
-  "compare_s": 11.1,
+  "geometry_wall_s": 19.058481739000854,
+  "geometry_per_file_mean_s": 0.09023874965382325,
+  "geometry_per_file_median_s": 0.04076678599813022,
+  "geometry_per_file_p90_s": 0.080066162001458,
+  "geometry_per_file_max_s": 2.4342514839991054,
+  "compare_s": 11.03,
   "shape_checks": 92,
-  "shape_s": 8.63,
-  "total_s": 40.27
+  "shape_s": 8.59,
+  "total_s": 40.14
  },
  "summary": {
   "parts": 472,
@@ -36,7 +36,7 @@
   "redundant_stock_value": 117756.23,
   "currency": "ILS",
   "groups_other_currency": 0,
-  "bom_lines_to_update": 77,
+  "bom_lines_to_update": 74,
   "near_pairs": 33,
   "mirror_pairs": 5,
   "spec_conflicts": 15,

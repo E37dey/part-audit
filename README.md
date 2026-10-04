@@ -87,7 +87,7 @@ docs/research/  public API documentation that the connectors follow (with source
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements-dev.txt
 .venv/bin/python -m part_audit app            # http://127.0.0.1:8765, opens the browser
-.venv/bin/python -m pytest                    # 108 tests
+.venv/bin/python -m pytest                    # 110 tests
 ```
 
 `python -m part_audit app --port 8765 --workspace ~/PartAudit --no-demo --no-browser` are the options.
@@ -158,7 +158,7 @@ from the simulators, then audited. Numbers from `results/demo_factory_eval.json`
 | same shape, different spec (hard negatives) | 18 of 18 not merged (15 flagged as spec conflict) |
 | near-identical, mirror and old-revision variants | none merged |
 | planted data-quality and ERP issues | 81 planted in 14 kinds, 71 within what the checks look at: 70 found (one stale mass missed). Not checked: 7 missing materials on purchased parts (by design), 1 mass without a STEP file, 2 empty descriptions that the SOLIDWORKS PDM and Vault simulators fill with the name |
-| time | 4.5 s reading 6 sources + 40.3 s audit (472 parts, 2 workers, cold cache) |
+| time | 4.7 s reading 6 sources + 40.1 s audit (472 parts, 2 workers, cold cache) |
 
 The v1 measurements (held-out ABC test set, NIST files, 5000-file benchmark) are in [RESULTS.md](RESULTS.md),
 including a re-run of the v1 test set with the v2 engine. The v1 command-line tool is documented in
