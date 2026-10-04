@@ -145,16 +145,6 @@ def test_a_file_that_is_not_step_is_refused(scan, index):
 
 # ------------------------------------------------------------------------------------------------ web API
 
-@pytest.fixture(scope="module")
-def client(scan, tmp_path_factory):
-    from fastapi.testclient import TestClient
-    from part_audit.server.app import create_app
-    app = create_app(tmp_path_factory.mktemp("ws"), factory_dir=None, demo=False)
-    with TestClient(app, base_url="http://127.0.0.1:8765") as c:
-        c.app_store = app.state.store
-        yield c
-
-
 def _wait(client, jid):
     for _ in range(600):
         j = client.get(f"/api/jobs/{jid}").json()
@@ -164,16 +154,33 @@ def _wait(client, jid):
     raise AssertionError("job did not finish")
 
 
+@pytest.fixture(scope="module")
+def client(scan, tmp_path_factory):
+    """The local app with the plant's folder and ERP file, scanned once."""
+    from fastapi.testclient import TestClient
+    from part_audit.server.app import create_app
+    app = create_app(tmp_path_factory.mktemp("ws"), factory_dir=None, demo=False)
+    with TestClient(app, base_url="http://127.0.0.1:8765") as c:
+        c.app_store = app.state.store
+        for s in ({"kind": "folder", "name": "CAD", "config": {"path": str(scan["root"] / "cad")}},
+                  {"kind": "erp_file", "name": "ERP", "config": {"path": str(scan["root"] / "erp.csv")}}):
+            c.post("/api/sources", json=s)
+        assert _wait(c, c.post("/api/scan").json()["job_id"])["status"] == "done"
+        yield c
+
+
+def test_nothing_to_check_against_before_the_first_scan(tmp_path):
+    from fastapi.testclient import TestClient
+    from part_audit.server.app import create_app
+    with TestClient(create_app(tmp_path / "ws", factory_dir=None, demo=False), base_url="http://127.0.0.1:8765") as c:
+        r = c.post("/api/checks", files={"file": ("a.step", b"ISO-10303-21;", "application/octet-stream")})
+        assert r.status_code == 400 and "סריקה" in r.json()["error"]
+
+
 def test_check_api(client, scan):
     moved = scan["new"] / "api_bracket.step"
     cadops.write_step(cadops.transform(scan["base"], cadops.random_rigid(random.Random(21))), str(moved))
     files = {"file": ("new_bracket.step", moved.read_bytes(), "application/octet-stream")}
-    # nothing to compare with before the first scan
-    assert client.post("/api/checks", files=files, data={"name": "תושבת"}).status_code == 400
-    for s in ({"kind": "folder", "name": "CAD", "config": {"path": str(scan["root"] / "cad")}},
-              {"kind": "erp_file", "name": "ERP", "config": {"path": str(scan["root"] / "erp.csv")}}):
-        client.post("/api/sources", json=s)
-    assert _wait(client, client.post("/api/scan").json()["job_id"])["status"] == "done"
     rid = client.get("/api/status").json()["latest_run"]
     assert (client.app_store.run_dir(rid) / "files.json").exists()
 
