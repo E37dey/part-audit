@@ -5,6 +5,7 @@ import { OrbitControls } from "./../vendor/OrbitControls.js";
 import { binary } from "./api.js";
 
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const reducedMotion = () => window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function parseMesh(buf) {
   const dv = new DataView(buf);
@@ -88,15 +89,27 @@ function buildObject(m, color) {
   g.setAttribute("position", new THREE.BufferAttribute(m.pos, 3));
   g.setIndex(new THREE.BufferAttribute(m.idx, 1));
   g.computeVertexNormals();
-  const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.55, polygonOffset: true,
+  // satin machined finish: some metal, soft highlights
+  const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.32, roughness: 0.42, polygonOffset: true,
     polygonOffsetFactor: 1, polygonOffsetUnits: 1, side: THREE.DoubleSide });
   const mesh = new THREE.Mesh(g, mat);
   const eg = new THREE.BufferGeometry();
   eg.setAttribute("position", new THREE.BufferAttribute(m.edges, 3));
-  const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: css("--viewer-edge", "#2a3640") }));
+  const edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: css("--viewer-edge", "#2a3640"), transparent: true, opacity: 0.75 }));
   const grp = new THREE.Group();
   grp.add(mesh, edges);
   return { grp, mesh, edges, geom: g };
+}
+
+// a light fixed to the camera, shining from `from` toward the middle of the view (camera coordinates)
+function cameraLight(camera, color, intensity, from) {
+  const l = new THREE.DirectionalLight(color, intensity);
+  l.position.set(...from);
+  const t = new THREE.Object3D();
+  t.position.set(0, 0, -10);
+  camera.add(l, t);
+  l.target = t;
+  return l;
 }
 
 export class Viewer {
@@ -110,22 +123,28 @@ export class Viewer {
     this.objects = [];
     this.syncing = false;
     try {
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+      // transparent canvas: the stage (gradient, grid, corners) is drawn by CSS, so it follows the theme
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     } catch (e) {
       this.msg.textContent = "הדפדפן לא תומך בתצוגה תלת-ממדית (WebGL)";
       this.failed = true;
       return;
     }
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.localClippingEnabled = true;
     this.el.prepend(this.renderer.domElement);
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(css("--viewer-bg", "#eef1f1"));
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 1e6);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x5a6670, 1.15));
-    const d1 = new THREE.DirectionalLight(0xffffff, 1.5); d1.position.set(1, 1.4, 1.2);
-    const d2 = new THREE.DirectionalLight(0xffffff, 0.55); d2.position.set(-1.2, -0.4, -0.8);
-    this.camera.add(d1, d2);
+    // studio light: sky/ground fill, a key from the upper right, a cool fill from the left, a rim from behind
+    this.hemi = new THREE.HemisphereLight(css("--hemi-sky", "#e4ecff"), css("--hemi-ground", "#26303b"), 1.05);
+    this.scene.add(this.hemi);
+    cameraLight(this.camera, 0xffffff, 1.55, [4, 5, 3]);
+    cameraLight(this.camera, 0xc7d8ff, 0.45, [-5, -1, 2]);
+    this.rim = cameraLight(this.camera, css("--viewer-rim", "#9fd0ff"), 1.1, [0, 3, -25]);
     this.scene.add(this.camera);
+    this.onTheme = () => this.applyTheme();
+    window.addEventListener("pa-theme", this.onTheme);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
     this.controls.addEventListener("change", () => { this.render(); if (!this.syncing && this.onCamera) this.onCamera(this); });
@@ -168,7 +187,74 @@ export class Viewer {
     this.meshData = m;
     this.msg.hidden = true;
     this.fit();
+    this.reveal(o);
     return o;
+  }
+
+  // the model is drawn in by a laser sheet moving up through it (once, when it loads). The box is read every
+  // frame, so a part that gets turned while it loads (aligned to the first one) is still scanned bottom to top.
+  reveal(o) {
+    if (this.failed || reducedMotion()) return;
+    const box = new THREE.Box3(), size = new THREE.Vector3(), c = new THREE.Vector3();
+    const measure = () => {
+      box.setFromObject(o.grp);
+      box.getSize(size); box.getCenter(c);
+      return 0.03 * Math.max(size.x, size.y, size.z, 1e-6);
+    };
+    let pad = measure();
+    if (box.isEmpty()) return;
+    const plane = new THREE.Plane(new THREE.Vector3(0, -1, 0), box.min.y - pad);
+    const mats = [o.mesh.material, o.edges.material];
+    mats.forEach((mt) => { mt.clippingPlanes = [plane]; mt.needsUpdate = true; });
+    const dye = new THREE.Color(css("--dye", "#5b8cff"));
+    const sheet = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: dye, transparent: true, opacity: 0.16,
+      side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const rim = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)),
+      new THREE.LineBasicMaterial({ color: dye, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+    sheet.rotation.x = rim.rotation.x = -Math.PI / 2;
+    const scan = new THREE.Group();
+    scan.add(sheet, rim);
+    this.scene.add(scan);
+    const t0 = performance.now(), dur = 1050, fade = 260;
+    const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    const done = () => {
+      mats.forEach((mt) => { mt.clippingPlanes = null; mt.needsUpdate = true; });
+      this.scene.remove(scan);
+      sheet.geometry.dispose(); sheet.material.dispose(); rim.geometry.dispose(); rim.material.dispose();
+      this.render();
+    };
+    const step = (now) => {
+      if (this.failed || this.main !== o) { done(); return; }
+      pad = measure();
+      const t = (now - t0) / dur;
+      const y = t < 1 ? box.min.y - pad + (box.max.y - box.min.y + 2 * pad) * ease(t) : box.max.y + pad;
+      plane.constant = y;
+      scan.position.set(c.x, y, c.z);
+      scan.scale.set(size.x * 1.18 + 2 * pad, 1, size.z * 1.18 + 2 * pad);
+      if (t >= 1) {
+        const f = Math.min(1, (now - t0 - dur) / fade);
+        sheet.material.opacity = 0.16 * (1 - f);
+        rim.material.opacity = 0.9 * (1 - f);
+        if (f >= 1) { done(); return; }
+      }
+      this.render();
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  // colors that come from the theme (part, edges, rim light); the stage itself is CSS
+  applyTheme() {
+    if (this.failed) return;
+    this.rim.color.set(css("--viewer-rim", "#9fd0ff"));
+    this.hemi.color.set(css("--hemi-sky", "#e4ecff"));
+    this.hemi.groundColor.set(css("--hemi-ground", "#26303b"));
+    this.objects.forEach((o) => {
+      o.edges.material.color.set(css("--viewer-edge", "#2a3640"));
+      if (o === this.main && !o.mesh.material.vertexColors) o.mesh.material.color.set(css("--viewer-part", "#b9c2c8"));
+      else if (o !== this.main) o.mesh.material.color.set(css("--brass", "#a9771a"));
+    });
+    this.render();
   }
 
   addOverlay(m, matrix, color = css("--brass", "#a9771a")) {
@@ -298,6 +384,7 @@ export class Viewer {
 
   dispose() {
     if (this.failed) return;
+    window.removeEventListener("pa-theme", this.onTheme);
     this.ro.disconnect();
     this.clear();
     this.controls.dispose();
