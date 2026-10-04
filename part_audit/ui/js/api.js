@@ -203,6 +203,10 @@ async function staticGet(path, params = {}) {
     if (!x) throw new Error("ההשוואה לסריקה הזו לא נכללה בגרסה המקוונת");
     return x;
   }
+  if ((m = p.match(/^runs\/[^/]+\/similar\/(.+)$/))) {
+    const x = (await staticJson("similar.json"))[decodeURIComponent(m[1])];
+    return x || { available: false, rows: [] };
+  }
   // pre-release checks: the examples that were run in the app on the demo's sample files
   if (p === "checks") return staticJson("checks.json");
   if (p === "checks/samples") return [];

@@ -209,6 +209,15 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
             out.append(row)
         return out
 
+    def similar_rows(res: dict, uid: str, near: list) -> list[dict]:
+        from ..similar import relation_of
+        idx = res["_index"]
+        pairs = {frozenset((p["a"], p["b"])): p for p in res["pairs"] if uid in (p["a"], p["b"])}
+        return [{"uid": u, "distance": round(d, 4), "relation": relation_of(idx[uid], idx[u], pairs.get(frozenset((uid, u)))),
+                 "part": {k: idx[u].get(k) for k in ("uid", "pn", "name", "source", "source_kind", "state", "state_class",
+                                                    "bbox", "volume_mm3", "material", "group_id", "has_step", "spec")}}
+                for u, d in near if u in idx]
+
     def step_path(rid: str, uid: str) -> str:
         snap = store.run_dir(rid) / "step_paths.json"
         paths = json.loads(snap.read_text(encoding="utf-8")) if snap.exists() else {}
@@ -657,6 +666,19 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
                 "issues": issues, "history": hist, "props": props,
                 "products": [{"uid": t, "pn": idx[t]["pn"], "name": idx[t]["name"]} for t in tops if t in idx]}
 
+    @app.get("/api/runs/{rid}/similar/{uid:path}")
+    def similar(rid: str, uid: str, k: int = 10):
+        """Parts whose shape is closest to this one (shape search), with the engine's verdict where it has one."""
+        rid, res = load_result(rid)
+        idx = res["_index"]
+        if uid not in idx:
+            raise HTTPException(404, "החלק לא נמצא")
+        si = shape_index(rid)
+        if uid not in si:
+            return {"available": False, "uid": uid, "rows": []}
+        return {"available": True, "uid": uid, "compared": len(si) - 1,
+                "rows": similar_rows(res, uid, si.nearest_to(uid, max(1, min(k, 30))))}
+
     # ------------------------------------------------------------------ 3D
     @app.get("/api/mesh/{rid}/{uid:path}")
     def mesh(rid: str, uid: str):
@@ -725,7 +747,39 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     # stay in the workspace (checks/<id>/); nothing is sent to any system.
     checks_dir = store.ws / "checks"
     check_indexes: dict[str, object] = {}
+    shape_indexes: dict[str, object] = {}
     index_lock = threading.Lock()
+
+    def run_index(rid: str, progress=None):
+        """The parts of a scan as the engine sees them (built once per scan, kept for the latest one)."""
+        from ..precheck import build_index
+        with index_lock:
+            ix = check_indexes.get(rid)
+            if ix is None:
+                if progress:
+                    progress("index", 0.0, "מכין את מאגר החלקים מהסריקה האחרונה (פעם אחת לכל סריקה)")
+                ix = build_index(store.run_dir(rid), store.ws / "cache", run_id=rid, progress=progress)
+                check_indexes.clear()
+                check_indexes[rid] = ix
+            return ix
+
+    def shape_index(rid: str, progress=None):
+        """Shape numbers of every part of a scan that has a model (shape search)."""
+        from ..geometry import FingerprintCache
+        from ..similar import ShapeIndex
+        ix = run_index(rid, progress)
+        with index_lock:
+            si = shape_indexes.get(rid)
+            if si is None:
+                cache = FingerprintCache(str(store.ws / "cache" / "fingerprints"))
+                try:
+                    si = ShapeIndex.build(ix.items, cache)
+                finally:
+                    if cache.db is not None:
+                        cache.db.close()
+                shape_indexes.clear()
+                shape_indexes[rid] = si
+            return si
     max_check_bytes = 200 * 1024 * 1024
 
     def check_folder(cid: str) -> Path:
@@ -748,23 +802,18 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
 
     def start_check(cid: str, meta: dict) -> str:
         def work(progress, should_stop):
-            from ..precheck import CheckError, build_index, check_file
+            from ..precheck import CheckError, check_file
             d = checks_dir / cid
             try:
                 rid, res = load_result("latest")
-                with index_lock:
-                    ix = check_indexes.get(rid)
-                    if ix is None:
-                        progress("index", 0.0, "מכין את מאגר החלקים מהסריקה האחרונה (פעם אחת לכל סריקה)")
-                        ix = build_index(store.run_dir(rid), store.ws / "cache", run_id=rid, progress=progress)
-                        check_indexes.clear()
-                        check_indexes[rid] = ix
+                ix = run_index(rid, progress)
+                shapes = shape_index(rid)
                 st = ProjectSettings.from_dict(res.get("settings") or {})
                 out = check_file(ix, d / meta["stored"], res["_index"], filename=meta["file"], pn=meta["pn"],
                                  name=meta["name"], description=meta["description"], material=meta["material"],
                                  th=st.thresholds, cache_dir=store.ws / "cache", own_cache=d / "fingerprint",
                                  timeout_s=st.timeout_s, group_targets=group_targets(res, store.current_decisions()),
-                                 progress=progress)
+                                 shapes=shapes, progress=progress)
             except CheckError as exc:
                 out = {"error": str(exc)}
             except Exception as exc:   # kept with the check, so the page can say what happened
@@ -866,7 +915,7 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
         d, meta, res = check_result(cid)
         if not res or res.get("error"):
             raise HTTPException(404, "לבדיקה הזו אין תוצאה")
-        m = next((x for x in res.get("matches", []) if x["uid"] == b), None)
+        m = next((x for x in res.get("matches", []) + res.get("similar", []) if x["uid"] == b), None)
         if m is None:
             raise HTTPException(404, "החלק לא נמצא בין ההתאמות של הבדיקה")
         return d, meta, res, m

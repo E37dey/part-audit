@@ -221,3 +221,33 @@ def test_check_api(client, scan):
     assert main(["check", str(plate), "--workspace", ws, "--pn", "100-0002"]) == 1
     assert main(["check", str(scan["new"] / "api_text.step"), "--workspace", ws]) == 2
     assert not any(client.app_store.ws.glob("checks/*/fingerprint"))     # the command line stores nothing
+
+
+# ------------------------------------------------------------------------------------------------ shape search
+
+def _shapes(scan, index):
+    from part_audit.geometry import FingerprintCache
+    from part_audit.similar import ShapeIndex
+    return ShapeIndex.build(index.items, FingerprintCache(str(scan["cache"] / "fingerprints")))
+
+
+def test_shape_search_ranks_the_same_shape_first_and_ignores_position(scan, index):
+    shapes = _shapes(scan, index)
+    assert len(shapes) == 3
+    uid = next(u for u, p in scan["parts"].items() if p["pn"] == "100-0001")
+    near = shapes.nearest_to(uid, k=2)
+    assert scan["parts"][near[0][0]]["pn"] == "100-0002" and near[0][1] < 0.05      # the moved copy
+    assert scan["parts"][near[1][0]]["pn"] == "200-0001" and near[1][1] > 0.3       # the plate
+    # a new file: the same bracket twice as big is still the closest shape (size only breaks ties)
+    r = _check(scan, index, cadops.uniform_scale(scan["base"], 2.0), "big_bracket.step", shapes=shapes)
+    assert r["verdict"]["kind"] == "new"            # twice the size is not a unit factor: a different part
+    assert [x["part"]["pn"] for x in r["similar"][:2]] in (["100-0001", "100-0002"], ["100-0002", "100-0001"])
+    assert r["similar"][0]["relation"] == "similar"
+
+
+def test_similar_api(client, scan):
+    uid = next(p["uid"] for p in client.get("/api/runs/latest/parts", params={"q": "100-0001"}).json()["rows"])
+    r = client.get(f"/api/runs/latest/similar/{uid}").json()
+    assert r["available"] and r["compared"] == 2
+    assert r["rows"][0]["part"]["pn"] == "100-0002" and r["rows"][0]["relation"] == "same_group"
+    assert client.get("/api/runs/latest/similar/nope").status_code == 404

@@ -196,6 +196,9 @@ def main() -> None:
     parts = get("/api/runs/latest/parts", limit=1_000_000)["rows"]
     dump(data / "parts.json", parts)
     dump(data / "part_details.json", {p["uid"]: get(f"/api/runs/latest/parts/{p['uid']}") for p in parts})
+    # shape search: the ten closest shapes of every part with a model
+    dump(data / "similar.json", {p["uid"]: get(f"/api/runs/latest/similar/{p['uid']}", k=10)
+                                 for p in parts if p["has_step"] and p["kind"] == "part"})
     # pre-release checks the app ran on the demo's own sample files (the online copy cannot upload files);
     # a check of any other file stays out of the copy
     order = [s["key"] for s in get("/api/checks/samples")]
@@ -232,6 +235,10 @@ def main() -> None:
             if m["part"]["has_step"]:
                 align[f"check:{cid}|{m['uid']}"] = get(f"/api/checks/{cid}/align", b=m["uid"])
                 compares.add(f"check:{cid}|{m['uid']}", pac3(binary(f"/api/checks/{cid}/compare", b=m["uid"])))
+        # the closest shapes: their alignment only (the deviation map of every similar shape would be too much)
+        done_uids = {m["uid"] for m in c["matches"]}
+        for m in [x for x in c.get("similar", []) if x["uid"] not in done_uids and x["part"]["has_step"]][:4]:
+            align[f"check:{cid}|{m['uid']}"] = get(f"/api/checks/{cid}/align", b=m["uid"])
     compares.flush()
     dump(data / "align.json", align)
     dump(data / "compare_index.json", compares.index)

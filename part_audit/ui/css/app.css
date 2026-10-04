@@ -493,6 +493,10 @@ input[type="checkbox"] { accent-color: var(--dye); width: 15px; height: 15px; }
   .v-body h2 { font-size: 1.35rem; }
 }
 
+/* shape search: a relative closeness bar (a ranking, not a percentage) */
+.simbar { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.simbar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--dye), var(--info)); }
+
 /* ---------------------------------------------------------------- management report: a printable A4 sheet */
 /* the sheet is paper in both themes: the light tokens apply inside it, so chips and pills print well */
 .sheet { --surface: #ffffff; --surface-2: #f4f7f9; --surface-3: #e9eff4; --line: #dde4ea; --line-strong: #c3cfd8;

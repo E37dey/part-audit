@@ -2,7 +2,7 @@
 // scan - the same file, the same shape (also in other units), a near-identical shape, a mirror image, the same
 // standard part, a planned part number that is already taken.
 import { get, send, binary, isStatic, uploadCheck } from "../api.js";
-import { esc, n0, secs, date, datetime, pnChip, sysBadge, catPill, confBar, uidLink, statePill, ICON, dims, cm3 } from "../util.js";
+import { esc, n0, secs, date, datetime, pnChip, sysBadge, catPill, confBar, uidLink, statePill, ICON, dims, cm3, shapeRows } from "../util.js";
 import { toast, confirmInline } from "../ui.js";
 import { compare3d } from "../compare3d.js";
 
@@ -172,6 +172,8 @@ async function result({ el, param, setTitle, go }) {
     return null;
   }
   const v = c.verdict, cov = c.coverage, cnt = c.counts || {};
+  const inMatches = new Set(c.matches.map((m) => m.uid));
+  const sims = (c.similar || []).filter((x) => !inMatches.has(x.uid)).slice(0, 6);
   const use = v.use;
   const same = (cnt.identical || 0) + (cnt.standard_part || 0);
   const geo = c.geometry || {};
@@ -208,6 +210,11 @@ async function result({ el, param, setTitle, go }) {
         : `<div class="empty">לא נמצאה אף רשומה קשורה – לא לפי צורה, לא לפי שם ולא לפי מק"ט.</div>`}
     </section>
 
+    ${sims.length ? `<section class="panel"><div class="panel-h"><h2>הצורות הקרובות ביותר</h2><span class="sub">${v.kind === "new" ? "אין חלק זהה – אולי אחד מאלה מתאים לשימוש חוזר" : "חיפוש לפי צורה, בכל גודל"}</span></div>
+      <div class="table-wrap"><table class="t" id="st"><thead><tr><th class="n">#</th><th>חלק</th><th>מידות ונפח</th><th>מה המנוע אומר</th><th>קרבה בצורה</th><th></th></tr></thead>
+        <tbody>${shapeRows(sims)}</tbody></table></div>
+      <div class="panel-b small muted">הדירוג לפי פרופורציות, מילוי המעטפת, סוגי המשטחים והתפלגות המרחקים על פני השטח – בלי תלות במיקום, בסיבוב ובגודל. לחיצה על שורה מציגה אותה בתלת-ממד.</div></section>` : ""}
+
     <section class="panel"><div class="panel-h"><h2>מה נבדק</h2></div><div class="panel-b grid grid-2">
       <dl class="kv">
         <dt>קובץ</dt><dd><span class="mono ltr">${esc(c.file.name)}</span> <span class="small muted">${kb(c.file.size)}</span></dd>
@@ -227,14 +234,18 @@ async function result({ el, param, setTitle, go }) {
   wireDelete(el, param, go);
 
   // 3D: the new file against the selected record (the one to use, else the first match that has a model)
+  const all = [...c.matches, ...sims];          // rows of both tables: the matches first, then the closest shapes
   const withStep = c.matches.map((m, i) => [m, i]).filter(([m]) => m.part.has_step);
   let current = -1, dispose = null;
   const show = (i) => {
-    const m = c.matches[i];
+    const m = all[i];
     if (!m || i === current) return;
     if (!m.part.has_step) { toast("לחלק הזה אין קובץ STEP – אין השוואה תלת-ממדית"); return; }
     current = i;
+    el.querySelector("#mode").hidden = false;
+    el.querySelector("#c3-t").textContent = i < c.matches.length ? "החלק החדש מול החלק הקיים" : "החלק החדש מול צורה דומה";
     el.querySelectorAll("#mt tr[data-i]").forEach((tr) => tr.classList.toggle("sel", +tr.dataset.i === i));
+    el.querySelectorAll("#st tr[data-s]").forEach((tr) => tr.classList.toggle("sel", c.matches.length + +tr.dataset.s === i));
     if (dispose) dispose();
     const b = m.uid, run = c.run_id || "latest";
     dispose = compare3d(el.querySelector("#c3"), {
@@ -251,8 +262,11 @@ async function result({ el, param, setTitle, go }) {
     });
   };
   el.querySelectorAll("#mt tr[data-i]").forEach((tr) => (tr.onclick = (e) => { if (!e.target.closest("a")) show(+tr.dataset.i); }));
+  el.querySelectorAll("#st tr[data-s]").forEach((tr) => (tr.onclick = () => show(c.matches.length + +tr.dataset.s)));
   const first = withStep.find(([m]) => use && m.uid === use.uid) || withStep[0];
+  const firstSim = sims.findIndex((x) => x.part.has_step);
   if (first) show(first[1]);
+  else if (firstSim >= 0) show(c.matches.length + firstSim);
   else {
     el.querySelector("#mode").hidden = true;
     el.querySelector("#c3-t").textContent = "החלק החדש";

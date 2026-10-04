@@ -385,7 +385,7 @@ def verdict(matches: list[dict], it_pn: str, index: RunIndex, parts: dict[str, d
 def check_file(index: RunIndex, path: str | Path, parts: dict[str, dict], *, filename: str = "", pn: str = "",
                name: str = "", description: str = "", material: str = "", th: Thresholds | None = None,
                cache_dir: str | Path, own_cache: str | Path, timeout_s: float = 60.0,
-               group_targets: dict[str, dict] | None = None, progress: Progress | None = None) -> dict:
+               group_targets: dict[str, dict] | None = None, shapes=None, progress: Progress | None = None) -> dict:
     """Check one STEP file against a scan. ``parts`` are the scan's part rows by uid (for display); ``own_cache``
     is the folder where the new file's fingerprint is kept (apart from the scan's cache, so a running scan and a
     check never wait for each other)."""
@@ -415,8 +415,14 @@ def check_file(index: RunIndex, path: str | Path, parts: dict[str, dict], *, fil
     progress("compare", 0.5, f"משווה מול {index.n_parts} חלקים מהסריקה")
     t2 = time.perf_counter()
     scan_cache = FingerprintCache(str(Path(cache_dir) / "fingerprints"))
+    near_shapes: list[tuple[str, float]] = []
     try:
         pairs = compare_with_index(it, index, th, samples=_Samples(own, scan_cache))
+        if shapes is not None and geo_ok and len(shapes):
+            from .similar import shape_vector, size_of
+            vec = shape_vector(fp, own.get_samples(fp["sha"]))
+            if vec is not None:
+                near_shapes = shapes.nearest(vec, size_of(fp), k=8)
     finally:
         for c in (own, scan_cache):
             if c.db is not None:
@@ -460,6 +466,12 @@ def check_file(index: RunIndex, path: str | Path, parts: dict[str, dict], *, fil
     rows.sort(key=lambda r: (ORDER.index(r["category"]) if r["category"] in ORDER else 99, -round(r["confidence"], 2),
                              _rank_existing(r["part"])))
     v, notes = verdict(rows, pn, index, parts, geo_ok, geo_error, group_targets or {})
+    # shape search: the closest shapes of the scan, whatever their size (for reuse when nothing matched)
+    found = {r["uid"]: r["category"] for r in rows}
+    similar = [{"uid": u, "distance": round(d, 4), "relation": found.get(u, "similar"),
+                "part": {k: parts[u].get(k) for k in ("uid", "pn", "name", "source", "source_kind", "state", "state_class",
+                                                     "bbox", "volume_mm3", "material", "group_id", "has_step", "spec")}}
+               for u, d in near_shapes if u in parts]
     counts = defaultdict(int)
     for r in rows:
         counts[r["category"]] += 1
@@ -477,7 +489,7 @@ def check_file(index: RunIndex, path: str | Path, parts: dict[str, dict], *, fil
         "run_id": index.run_id, "run_created": index.created,
         "coverage": {"parts": index.n_parts, "with_step": index.n_with_step, "with_geometry": index.n_geometry},
         "verdict": v, "notes": notes, "counts": dict(counts), "matches": rows[:MAX_ROWS], "n_matches": len(rows),
-        "geometry": geo,
+        "geometry": geo, "similar": similar,
         "timings": {"read_s": round(t_read, 2), "geometry_s": round(t_geo, 2), "compare_s": round(t_cmp, 2),
                     "total_s": round(time.perf_counter() - t0, 2)},
     }

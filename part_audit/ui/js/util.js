@@ -109,3 +109,23 @@ export const ICON = {
 export const LOGO = `<svg width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#16202b" stroke="#ffffff" stroke-opacity="0.12"/>
   <path d="M9 23V9h8.6a5 5 0 0 1 0 10H13" stroke="#e2b45e" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="22.5" cy="22.5" r="2.2" fill="#5b8cff"/></svg>`;
+
+// shape search: what the engine says about a similar shape (its own verdict when it has one)
+export const SHAPE_REL = { same_group: ["אותו חלק – באותה קבוצת כפילות", "bad"], identical: ["אותה צורה", "bad"],
+  standard_part: ["אותו חלק תקני", "bad"], near_identical: ["כמעט זהה", "warn"], mirror: ["תמונת מראה", "info"],
+  identical_attr_conflict: ["אותה צורה, מפרט אחר", "warn"], conflict: ["אותו מק\"ט", "warn"], name_similar: ["צורה דומה", "neutral"],
+  conflict_unverified: ["אותו מק\"ט", "warn"], similar: ["צורה דומה", "neutral"] };
+// the bar is the same scale in every list: a full bar is the same shape, about half is "related", little is unrelated
+export function shapeRows(rows, { action = "" } = {}) {
+  return rows.map((r, i) => {
+    const [he, tone] = SHAPE_REL[r.relation] || SHAPE_REL.similar;
+    const w = Math.max(4, Math.round(100 * Math.max(0, 1 - r.distance / 2)));
+    const p = r.part;
+    return `<tr class="click" data-s="${i}"><td class="n">${i + 1}</td>
+      <td>${pnChip(p.pn)} <span>${esc(p.name || "")}</span><div class="small" style="margin-top:3px">${sysBadge(p.source_kind, p.source)}</div></td>
+      <td class="small">${dims(p.bbox)}${p.volume_mm3 != null ? `<div class="muted">${cm3(p.volume_mm3)}</div>` : ""}</td>
+      <td><span class="pill ${tone} plain">${he}</span></td>
+      <td style="min-width:110px"><div class="simbar" title="דירוג לפי מדד צורה יחסי – לא אחוז"><i style="width:${w}%"></i></div></td>
+      <td>${action}</td></tr>`;
+  }).join("");
+}

@@ -1,7 +1,9 @@
 // Everything known about one record: model, attributes, ERP, where it is used, history and findings.
-import { get } from "../api.js";
-import { esc, n0, kg, money, date, sysBadge, statePill, pnChip, rev, mb, cm3, dims, catPill, sevPill, uidLink, confBar } from "../util.js";
+import { get, binary } from "../api.js";
+import { esc, n0, kg, money, date, sysBadge, statePill, pnChip, rev, mb, cm3, dims, catPill, sevPill, uidLink, confBar, shapeRows } from "../util.js";
 import { Viewer } from "../viewer3d.js";
+import { modal } from "../ui.js";
+import { compare3d } from "../compare3d.js";
 
 export async function render({ el, param, setTitle }) {
   const p = await get(`/api/runs/latest/parts/${encodeURIComponent(param)}`);
@@ -60,6 +62,9 @@ export async function render({ el, param, setTitle }) {
         <td>${catPill(x.category)}</td><td class="small">${esc(x.reason_he)}</td><td class="n">${confBar(x.confidence)}</td>
         <td>${p.has_step && x.other.has_step ? `<a class="small nowrap" href="#/pair/${x.id}">השוואה</a>` : ""}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
 
+    ${p.has_step ? `<section class="panel" id="similar"><div class="panel-h"><h2>חלקים בצורה דומה</h2><span class="sub">חיפוש לפי צורה בכל המערכות, בלי קשר לשם או למק"ט</span></div>
+      <div class="panel-b muted small">מחפש…</div></section>` : ""}
+
     ${p.issues?.length ? `<section class="panel"><div class="panel-h"><h2>ממצאים</h2></div>
       <div class="table-wrap"><table class="t"><thead><tr><th>חומרה</th><th>סוג</th><th>פירוט</th></tr></thead><tbody>
       ${p.issues.map((q) => `<tr><td>${sevPill(q.severity)}</td><td class="small">${esc(q.type_he)}</td><td>${esc(q.message)}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
@@ -81,5 +86,36 @@ export async function render({ el, param, setTitle }) {
     v = new Viewer(box, { label: `${pnChip(p.pn)} ${sysBadge(p.source_kind, "")}` });
     v.loadUrl(`/api/mesh/latest/${encodeURIComponent(p.uid)}`);
   }
+  const sim = el.querySelector("#similar");
+  if (sim) {
+    get(`/api/runs/latest/similar/${encodeURIComponent(p.uid)}`).then((r) => {
+      if (!r.available || !r.rows.length) { sim.querySelector(".panel-b").textContent = "לא ניתן היה לחשב את הצורה של החלק הזה."; return; }
+      sim.querySelector(".panel-b").outerHTML = `<div class="table-wrap"><table class="t"><thead><tr><th class="n">#</th><th>חלק</th><th>מידות ונפח</th><th>מה המנוע אומר</th><th>קרבה בצורה</th><th></th></tr></thead>
+        <tbody>${shapeRows(r.rows, { action: '<button class="btn small" data-cmp>השוואה בתלת-ממד</button>' })}</tbody></table></div>
+        <div class="panel-b small muted">הדירוג לפי פרופורציות המעטפת, כמה מהמעטפת החלק ממלא, סוגי המשטחים והתפלגות המרחקים על פני השטח – בלי תלות במיקום, בסיבוב ובגודל (חלקים בגודל דומה מקבלים עדיפות קטנה). הושווה מול ${n0(r.compared)} חלקים עם מודל. "אותה צורה" ו"כמעט זהה" הם ההחלטות של ההשוואה המלאה.</div>`;
+      sim.querySelectorAll("tr[data-s]").forEach((tr) => (tr.onclick = (e) => {
+        const row = r.rows[+tr.dataset.s];
+        if (!e.target.closest("[data-cmp]")) { location.hash = `#/part/${encodeURIComponent(row.uid)}`; return; }
+        compareModal(p, row.part);
+      }));
+    }).catch((e) => { sim.querySelector(".panel-b").textContent = e.message; });
+  }
   return () => v && v.dispose();
+}
+
+function compareModal(a, b) {
+  let dispose = null;
+  const m = modal({ title: `${a.pn || a.name} מול ${b.pn || b.name}`, wide: true, body: '<div class="stack"><div class="row"><div class="seg" id="m-seg"></div></div><div id="m-c3"></div></div>',
+    onClose: () => dispose && dispose() });
+  dispose = compare3d(m.body.querySelector("#m-c3"), {
+    labelA: `${pnChip(a.pn)} ${sysBadge(a.source_kind, "")}`, labelB: `${pnChip(b.pn)} ${sysBadge(b.source_kind, "")}`,
+    overlayLabel: `<span class="pill neutral plain">אפור = ${esc(a.pn || "א")}</span> <span class="pill brass plain">זהב שקוף = ${esc(b.pn || "ב")}</span>`,
+    seg: m.body.querySelector("#m-seg"),
+    load: {
+      meshA: () => binary(`/api/mesh/latest/${encodeURIComponent(a.uid)}`),
+      meshB: () => binary(`/api/mesh/latest/${encodeURIComponent(b.uid)}`),
+      align: () => get("/api/align/latest", { a: a.uid, b: b.uid }),
+      compare: () => binary("/api/compare/latest", { a: a.uid, b: b.uid }),
+    },
+  });
 }
