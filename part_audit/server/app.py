@@ -9,6 +9,7 @@ import time
 import traceback
 import uuid
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -22,7 +23,7 @@ from ..project import ProjectSettings, audit_snapshot, collect
 from .store import Store
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
-LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1", "testserver")   # testserver: FastAPI's TestClient
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 
 
 def _host_name(host_header: str) -> str:
@@ -30,6 +31,29 @@ def _host_name(host_header: str) -> str:
     if h.startswith("["):                       # [::1]:8765
         return h[1:h.find("]")] if "]" in h else h
     return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def _host_port(host_header: str) -> int | None:
+    """Port of a Host header ('127.0.0.1:8765', '[::1]:8765'; none written means 80); None if malformed."""
+    h = host_header.strip()
+    if h.startswith("["):
+        rest = h[h.find("]") + 1:] if "]" in h else ""
+    elif h.count(":") == 1:
+        rest = h[h.find(":"):]
+    else:
+        rest = ""
+    if not rest:
+        return 80
+    return int(rest[1:]) if rest.startswith(":") and rest[1:].isdigit() else None
+
+
+def _same_origin(origin: str, host_header: str) -> bool:
+    """The page that sent the request was served by this app (same host name and port)."""
+    try:
+        u = urlsplit(origin.strip())
+    except ValueError:
+        return False
+    return u.scheme == "http" and u.netloc.lower() == host_header.strip().lower()
 DEFAULT_SETTINGS = {"user_name": "", "mass_tolerance": 0.10, "workers": max(1, (os.cpu_count() or 2) - 1),
                     "cost_per_pn_year": None, "currency": "ILS", "thresholds": {}}
 
@@ -57,7 +81,8 @@ class Jobs:
         def run():
             try:
                 job["result"] = fn(progress, lambda: job["cancel"])
-                job["status"] = "cancelled" if job["cancel"] else "done"
+                # a job that finished before it noticed the stop request is done (a scan's result is kept)
+                job["status"] = "cancelled" if job["cancel"] and job["result"] is None else "done"
             except Exception as exc:  # reported to the UI
                 job["status"], job["error"] = "error", f"{type(exc).__name__}: {exc}"
                 job["trace"] = traceback.format_exc()
@@ -102,16 +127,21 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     # no interactive API docs: they would load scripts from a CDN
     app = FastAPI(title="PartAudit", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
 
+    own_port = urlsplit(base_url).port or 80
+
     @app.middleware("http")
     async def local_only(request: Request, call_next):
         """Only this computer's browser may use the app: the Host header must be a loopback name (blocks DNS
-        rebinding), and a request that changes something must not come from another web site's page."""
+        rebinding), and a request that changes something must come from the app's own page: addressed to the
+        app's own port, with no other site as its origin."""
         host = request.headers.get("host", "")
         if _host_name(host) not in LOOPBACK_NAMES:
             return JSONResponse({"error": "גישה מותרת רק מהמחשב הזה (127.0.0.1)"}, status_code=403)
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
-            if origin is not None and origin != f"http://{host}" and origin != f"https://{host}":
+            site = (request.headers.get("sec-fetch-site") or "").lower()
+            if (_host_port(host) != own_port or (origin is not None and not _same_origin(origin, host))
+                    or site not in ("", "same-origin", "none")):
                 return JSONResponse({"error": "בקשה מאתר אחר נחסמה"}, status_code=403)
             if request.url.path.startswith("/api/"):
                 ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()

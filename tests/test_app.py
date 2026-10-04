@@ -173,7 +173,7 @@ def client(plant, tmp_path_factory):
     from fastapi.testclient import TestClient
     from part_audit.server.app import create_app
     app = create_app(tmp_path_factory.mktemp("ws"), factory_dir=None, demo=False)
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1:8765") as c:     # the app answers only on this computer
         yield c
 
 
@@ -254,6 +254,15 @@ def test_only_this_computer_and_this_page(client):
     assert r.status_code == 403
     assert client.post("/api/scan", content=b"x", headers={"content-type": "text/plain"}).status_code == 415
     assert client.get("/api/docs").status_code == 404            # no CDN-backed API docs page
+    assert client.get("/api/status", headers={"host": "testserver"}).status_code == 403   # a name DNS could resolve
+    # a change must come from the app's own page: not another local port, not a page that says it is cross-site
+    body = {"target_type": "issue", "target_id": "x", "decision": "review"}
+    for headers in ({"origin": "http://localhost:9999"}, {"origin": "http://127.0.0.1:8766"}, {"origin": "null"},
+                    {"host": "127.0.0.1:9999"}, {"sec-fetch-site": "cross-site"}, {"sec-fetch-site": "same-site"}):
+        assert client.post("/api/decisions", json=body, headers=headers).status_code == 403, headers
+    ok = client.post("/api/decisions", json=body, headers={"origin": "http://127.0.0.1:8765", "sec-fetch-site": "same-origin"})
+    assert ok.status_code == 200
+    assert client.get("/api/status", headers={"host": "localhost:9999"}).status_code == 200   # reading is not a change
 
 
 def test_group_decisions_keep_their_target(client):
@@ -281,6 +290,26 @@ def test_stopped_scan_is_not_kept(client):
         time.sleep(0.2)
     assert j["status"] == "cancelled"
     assert client.get("/api/status").json()["latest_run"] == before
+
+
+def test_a_job_that_finished_is_not_reported_as_stopped():
+    """Pressing stop after the scan already finished keeps it: the job is done, not cancelled."""
+    import threading
+    from part_audit.server.app import Jobs
+    jobs, go = Jobs(), threading.Event()
+    late = jobs.start("scan", lambda progress, stop: (go.wait(5), {"run_id": "r1"})[1])
+    jobs.jobs[late]["cancel"] = True
+    go.set()
+    go2 = threading.Event()
+    stopped = jobs.start("scan", lambda progress, stop: (go2.wait(5), None if stop() else {"run_id": "r2"})[1])
+    jobs.jobs[stopped]["cancel"] = True
+    go2.set()
+    for _ in range(100):
+        if all(jobs.get(j)["status"] != "running" for j in (late, stopped)):
+            break
+        time.sleep(0.05)
+    assert jobs.get(late)["status"] == "done" and jobs.get(late)["result"] == {"run_id": "r1"}
+    assert jobs.get(stopped)["status"] == "cancelled"
 
 
 def test_priority_token_is_a_secret_and_moves_with_the_address(client):

@@ -129,7 +129,7 @@ def main() -> None:
     data = out / "data"
     data.mkdir(parents=True)
     (out / MARKER).write_text("written by tools/export_static.py\n", encoding="utf-8")
-    client = TestClient(create_app(args.workspace))
+    client = TestClient(create_app(args.workspace), base_url="http://127.0.0.1:8765")   # loopback only
 
     def get(path, **params):
         r = client.get(path, params=params)

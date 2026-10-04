@@ -71,7 +71,7 @@ class ReadOnlyHttp:
                 r = self.client.request(method, url, **kw)
                 self.log.append(f"{method} {urlsplit(url).path} -> {r.status_code}")
                 if r.status_code in (429, 502, 503, 504) and attempt < self.retries:
-                    time.sleep(float(r.headers.get("Retry-After", "1") or 1))
+                    time.sleep(_retry_after(r.headers.get("Retry-After")))
                     continue
                 return r
             except httpx.TransportError as exc:
@@ -79,6 +79,8 @@ class ReadOnlyHttp:
                 if attempt < self.retries:
                     time.sleep(0.5 * (attempt + 1))
                     continue
+            except httpx.HTTPError as exc:   # too many redirects, a reply that cannot be decoded, ...
+                raise ConnectorError(f"תשובה לא תקינה מהשרת: {exc}", detail=str(exc)) from exc
         raise ConnectorError(f"השרת לא זמין: {last}", detail=str(last))
 
     def get(self, path: str, **kw) -> httpx.Response:
@@ -121,7 +123,7 @@ class ReadOnlyHttp:
             if expected and expected.isdigit() and int(expected) != n and not r.headers.get("content-encoding"):
                 raise ConnectorError(f"ההורדה נקטעה ({n} מתוך {expected} בתים)")
             os.replace(tmp, dest)
-        except httpx.TransportError as exc:
+        except httpx.HTTPError as exc:      # connection lost, too many redirects, content that cannot be decoded
             raise ConnectorError(f"ההורדה נכשלה: {exc}", detail=str(exc)) from exc
         finally:
             if tmp.exists():
@@ -130,6 +132,14 @@ class ReadOnlyHttp:
 
     def close(self) -> None:
         self.client.close()
+
+
+def _retry_after(value) -> float:
+    """Seconds to wait from a Retry-After header (a number; an HTTP date or junk means 1 s), at most 30."""
+    try:
+        return min(30.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return 1.0
 
 
 def http_error_he(status: int) -> str:

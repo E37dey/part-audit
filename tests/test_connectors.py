@@ -36,6 +36,30 @@ def test_only_listed_calls_pass_the_guard():
         h._check("POST", h.url("Login/../Items"))   # the allow-list is anchored on the path end
 
 
+def _mock(h, handler):
+    """Serve h's requests from handler, keeping h's own client settings (the write guard hook)."""
+    import httpx
+    h.client = httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True,
+                            event_hooks=h.client.event_hooks)
+
+
+def test_bad_replies_become_connector_errors(tmp_path):
+    """A redirect loop or a body that cannot be decoded is reported like any other server problem, and a failed
+    download leaves no file behind."""
+    import httpx
+    from part_audit.connectors.http import ConnectorError
+    h = ReadOnlyHttp("http://127.0.0.1:9/api/")
+    _mock(h, lambda req: httpx.Response(302, headers={"Location": str(req.url)}))
+    with pytest.raises(ConnectorError):
+        h.get("Items")
+    _mock(h, lambda req: httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=b"this is not gzip"))
+    with pytest.raises(ConnectorError):
+        h.get("Items")
+    with pytest.raises(ConnectorError):
+        h.download("files/1.step", tmp_path / "1.step")
+    assert list(tmp_path.iterdir()) == []
+
+
 needs_factory = pytest.mark.skipif(not (DEMO_DIR / "factory.json").exists(), reason="demo factory not built")
 
 
