@@ -92,7 +92,28 @@ def main(argv: list[str] | None = None) -> int:
     us.add_argument("--password-stdin", action="store_true", help="read the password from standard input")
     us.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
 
+    bk = sub.add_parser("backup", help="save the workspace (decisions, sources, results) to a zip file")
+    bk.add_argument("out", help="the zip file to write")
+    bk.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
+    rt = sub.add_parser("restore", help="restore a backup zip into a workspace")
+    rt.add_argument("zip", help="the backup file")
+    rt.add_argument("--workspace", default=str(Path.home() / "PartAudit"))
+    rt.add_argument("--force", action="store_true", help="replace an existing workspace (its database is kept aside)")
+
     args = ap.parse_args(argv)
+    if args.cmd in ("backup", "restore"):
+        from . import backup
+        try:
+            if args.cmd == "backup":
+                n = backup.make_backup(args.workspace, args.out)
+                print(f"{args.out}: {n} files. It holds the sources' connection settings: keep it private.")
+            else:
+                n = backup.restore_backup(args.zip, args.workspace, args.force)
+                print(f"restored {n} files into {args.workspace}")
+        except (OSError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        return 0
     if args.cmd == "app":
         return run_app(args)
     if args.cmd == "serve":

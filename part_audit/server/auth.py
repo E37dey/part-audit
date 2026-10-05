@@ -142,7 +142,7 @@ PUBLIC = {"/api/auth/me", "/api/auth/login", "/api/auth/logout", "/api/auth/oidc
 ENGINEER_WRITES = (re.compile(r"/api/decisions"), re.compile(r"/api/scan"), re.compile(r"/api/jobs/[^/]+/cancel"),
                    re.compile(r"/api/checks"), re.compile(r"/api/checks/sample/[^/]+"), re.compile(r"/api/checks/[^/]+"),
                    re.compile(r"/api/packages"))
-ADMIN_READS = (re.compile(r"/api/settings"), re.compile(r"/api/users(/.*)?"), re.compile(r"/api/sources/[^/]+/discovery"))
+ADMIN_READS = (re.compile(r"/api/settings"), re.compile(r"/api/users(/.*)?"), re.compile(r"/api/backup"), re.compile(r"/api/sources/[^/]+/discovery"))
 
 
 def required_role(method: str, path: str) -> str | None:

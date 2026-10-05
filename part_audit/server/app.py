@@ -295,6 +295,17 @@ def create_app(workspace: str | Path, factory_dir: str | Path | None = DEMO_DIR,
     def list_connectors():
         return [C.describe() for C in connectors.CONNECTORS.values()]
 
+    @app.get("/api/backup")
+    def download_backup():
+        import io
+        import time as _t
+
+        from ..backup import make_backup
+        buf = io.BytesIO()
+        make_backup(workspace, buf)
+        name = f"PartAudit-backup-{_t.strftime('%Y%m%d-%H%M')}.zip"
+        return Response(buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     @app.get("/api/settings")
     def get_settings():
         import datetime as dt

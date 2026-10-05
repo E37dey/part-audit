@@ -147,6 +147,9 @@ export async function render({ el, setTitle, refreshStatus, state }) {
 
     <div class="row"><button class="btn primary" id="save">שמור הגדרות</button><span class="small muted">ההגדרות חלות מהסריקה הבאה.</span></div>
 
+    ${isStatic ? "" : `<section class="panel" id="backup"><div class="panel-h"><h2>גיבוי</h2><span class="sub">ההחלטות, המקורות והתוצאות בקובץ אחד</span></div><div class="panel-b stack">
+      <p class="small muted">הקובץ שומר את כל מה שנצבר בתוכנה: החלטות, מקורות, תוצאות סריקות. הוא כולל את הגדרות החיבור למערכות, ואולי סיסמאות, ולכן שומרים אותו במקום מוגן. שחזור: <span class="mono ltr">python -m part_audit restore FILE.zip</span></p>
+      <div class="row"><a class="btn" href="/api/backup" download>הורדת גיבוי</a></div></div></section>`}
     <section class="panel"><div class="panel-h"><h2>יומן החלטות</h2><span class="sub">כל ההחלטות שנרשמו, מהחדשה לישנה</span></div>
       <div class="table-wrap" style="max-height:420px"><table class="t"><thead><tr><th>מתי</th><th>מי</th><th>על מה</th><th>מזהה</th><th>החלטה</th><th>הערה</th></tr></thead><tbody>
       ${decisions.length ? decisions.slice(0, 500).map((d) => `<tr><td class="nowrap">${datetime(d.created)}</td><td>${esc(d.user)}</td><td>${TYPE_HE[d.target_type] || esc(d.target_type)}</td>

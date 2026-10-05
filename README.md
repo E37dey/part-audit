@@ -113,7 +113,7 @@ docs/research/  public API documentation that the connectors follow (with source
 ```bash
 uv venv --python 3.12 .venv && uv pip install --python .venv -r requirements-dev.txt
 .venv/bin/python -m part_audit app            # http://127.0.0.1:8765, opens the browser
-.venv/bin/python -m pytest                    # 182 tests
+.venv/bin/python -m pytest                    # 187 tests
 ```
 
 `python -m part_audit app --port 8765 --workspace ~/PartAudit --no-demo --no-browser` are the options.
