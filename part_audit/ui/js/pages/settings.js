@@ -67,7 +67,7 @@ function teamPanels(s, users) {
           <label class="check" style="align-self:end"><input type="checkbox" id="oc-auto" ${oc.auto_create !== false ? "checked" : ""}> ליצור משתמש אוטומטית בכניסה הראשונה</label>
         </div>
         <div class="callout small">אצל ספק הזהות רושמים את PartAudit כאפליקציית Web עם כתובת החזרה (Redirect URI):
-          <div class="row" style="margin-top:6px"><span class="mono ltr" id="oc-cb">${esc(callback)}</span>${isStatic ? "" : '<button class="btn small" type="button" id="oc-copy">העתקה</button>'}</div></div>
+          <div class="row" style="margin-top:6px"><span class="mono ltr" id="oc-cb" style="overflow-wrap:anywhere;min-width:0">${esc(callback)}</span>${isStatic ? "" : '<button class="btn small" type="button" id="oc-copy">העתקה</button>'}</div></div>
         <div class="callout small">כשהאפשרות פעילה, השרת פונה רק לכתובת ספק הזהות שהוזנה כאן. הכניסה עובדת בשרת הצוות; במחשב יחיד אין כניסה בכלל.</div>
         <div><button class="btn small" type="button" id="oc-test">שמירה ובדיקת החיבור לספק</button></div>
       </div></section>`;

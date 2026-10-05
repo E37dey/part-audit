@@ -643,6 +643,10 @@ table.grid-map td i { position: absolute; top: 2px; inset-inline-end: 4px; font-
   .next-step:first-child { border-top: 0; }
   .bar-row { grid-template-columns: minmax(80px, 38%) minmax(0, 1fr) 46px; }
   .readout .r-value { font-size: 1.6rem; }
+  .primer { width: 100%; }
+  .primer, .primer > *, .lhero > *, .chap > *, .sheet { min-width: 0; }
+  .sheet table, .page .table-wrap table { max-width: 100%; }
+  .sheet section { overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
