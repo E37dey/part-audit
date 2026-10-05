@@ -632,10 +632,9 @@ table.grid-map td i { position: absolute; top: 2px; inset-inline-end: 4px; font-
   .app { grid-template-columns: minmax(0, 1fr); }
   .rail { position: static; height: auto; padding: 12px; border-inline-end: 0; border-bottom: 1px solid var(--rail-line); }
   .brand { padding-bottom: 8px; }
-  .nav { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 4px; padding-bottom: 4px; }
-  .nav a { padding: 6px 10px; font-size: 0.85rem; white-space: nowrap; }
-  .nav a.active::before { display: none; }
-  .nav-sep, .nav-step, .rail-foot .lock { display: none; }
+  .nav { flex-direction: column; flex-wrap: nowrap; overflow: visible; gap: 2px; padding-bottom: 4px; }
+  .nav a { padding: 9px 10px; font-size: 0.92rem; white-space: normal; }
+  .nav-sep, .rail-foot .lock { display: none; }
   .rail-foot { margin-top: 6px; padding-top: 0; }
   .content { padding: 16px; }
   .topbar { padding: 10px 16px; position: static; }
